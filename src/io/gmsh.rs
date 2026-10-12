@@ -56,33 +56,36 @@ impl<const D: usize> FromGmsh<D> for Poi1<D> {
     }
 }
 
-/// 一个物理组对应的单元块：单元类型编号 + 每个单元的节点 id 列表。
+/// Element block of a single physical group: element type number + per-element node id lists.
 struct ElementBlock {
     elem_type: i32,
     connectivity: Vec<Vec<usize>>,
 }
 
-/// GMSH 网格的中间产物。
+/// Intermediate product of a GMSH mesh.
 ///
-/// [`read_gmsh`] 解析 `.msh` 文件后，把节点坐标表和按物理组分组的单元连接
-/// 信息保存在这里，不绑定具体单元类型。调用者通过 [`GmshMesh::elements`]
-/// 传入 physical name 得到对应类型的单元向量 `Vec<T>`；由于一个物理组内的
-/// 单元类型一致，`Vec<T>` 中的 `T` 是单一类型。
+/// After [`read_gmsh`] parses an `.msh` file, the node coordinate table and the
+/// element connectivity grouped by physical group are stored here, without
+/// binding to a concrete element type. Callers obtain a typed element vector
+/// `Vec<T>` for a physical name via [`GmshMesh::elements`]; since all elements
+/// in one physical group share the same element type, `T` in `Vec<T>` is a
+/// single type.
 pub struct GmshMesh<const D: usize> {
-    /// 节点表：`node-id → Node`。
+    /// Node table: `node-id → Node`.
     pub nodes: HashMap<usize, Node<D>>,
-    /// 物理组名称：`physical-tag → name`。
+    /// Physical group names: `physical-tag → name`.
     pub physical_names: HashMap<i32, String>,
-    /// 单元块：`physical-tag → ElementBlock`。
+    /// Element blocks: `physical-tag → ElementBlock`.
     blocks: HashMap<i32, ElementBlock>,
 }
 
 impl<const D: usize> GmshMesh<D> {
-    /// 按 physical name 生成对应类型的单元向量。
+    /// Builds the typed element vector for a physical name.
     ///
     /// # Panics
     ///
-    /// 找不到该 physical name，或该物理组的单元类型与 `T` 不一致时 panic。
+    /// Panics if the physical name is not found, or if the element type of that
+    /// physical group does not match `T`.
     pub fn elements<T: FromGmsh<D>>(&self, physical_name: &str) -> Vec<T> {
         let tag = self
             .physical_names
@@ -93,11 +96,12 @@ impl<const D: usize> GmshMesh<D> {
         self.elements_by_tag::<T>(tag)
     }
 
-    /// 按 physical tag 生成对应类型的单元向量。
+    /// Builds the typed element vector for a physical tag.
     ///
     /// # Panics
     ///
-    /// 找不到该 physical tag，或该物理组的单元类型与 `T` 不一致时 panic。
+    /// Panics if the physical tag is not found, or if the element type of that
+    /// physical group does not match `T`.
     pub fn elements_by_tag<T: FromGmsh<D>>(&self, tag: i32) -> Vec<T> {
         let block = self
             .blocks
@@ -118,14 +122,15 @@ impl<const D: usize> GmshMesh<D> {
     }
 }
 
-/// 解析 GMSH v4 `.msh` 文件，返回中间产物 [`GmshMesh`]。
+/// Parses a GMSH v4 `.msh` file and returns the intermediate product [`GmshMesh`].
 ///
-/// 该函数只读取，不构造具体单元类型；单元向量由 [`GmshMesh::elements`]
-/// 按 physical name 按需生成。
+/// This function only reads the file and does not construct concrete element
+/// types; element vectors are materialized on demand by [`GmshMesh::elements`]
+/// per physical name.
 ///
 /// # Panics
 ///
-/// 文件不是 GMSH v4、格式损坏、或缺少必需 section 时 panic。
+/// Panics if the file is not GMSH v4, is malformed, or lacks a required section.
 pub fn read_gmsh<const D: usize>(filepath: impl AsRef<Path>) -> GmshMesh<D> {
     let file = File::open(filepath.as_ref()).expect("cannot open .msh file");
     let mut reader = BufReader::with_capacity(64 * 1024, file); // 64 KiB buffer
@@ -525,7 +530,7 @@ mod tests {
     #[test]
     fn reads_points_and_segments() {
         let mesh = read_gmsh::<1>("test/msh/patchtest1D.msh");
-        // phys 0（无名）→ 2 个点单元；phys 1 "line" → 1 个线段单元。
+        // phys 0 (unnamed) → 2 point elements; phys 1 "line" → 1 segment element.
         let points: Vec<Poi1<1>> = mesh.elements_by_tag(0);
         assert_eq!(points.len(), 2, "expected 2 point elements");
         let segs: Vec<Seg2<1>> = mesh.elements("line");

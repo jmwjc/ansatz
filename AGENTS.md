@@ -17,17 +17,16 @@
 - `[profile.release] debug = 1` — release 构建保留调试符号，用于性能剖析。
 - Features：
   - `default = ["sparse"]`；`sparse`、`std` 目前仅为占位开关；
-  - `dhat-heap` / `dhat-ad-hoc` — 启用 dhat 剖析（`main.rs` 中已接入 `#[global_allocator]` 与 `Profiler`）；
+  - `dhat-heap` / `dhat-ad-hoc` — 启用 dhat 剖析（`examples/bar1d.rs` 中已接入 `#[global_allocator]` 与 `Profiler`）；
   - `parallel` — 启用 rayon（暂未在代码中使用）。
 
 ## 2. 代码组织
 
-库入口为 `src/lib.rs`（`main.rs` 只是调用库的示例程序）。全部注释和 rustdoc 使用中文。
+库入口为 `src/lib.rs`。源码（`src/` 与 `examples/`）的注释和 rustdoc 统一使用英文。
 
 ```
 src/
 ├── lib.rs            # 库入口，声明公共模块
-├── main.rs           # 可执行示例：读 GMSH 网格 + 1D 桁架组装/求解（库的唯一消费者）
 ├── node.rs           # Node<const D: usize> { id, coordinates: [f64; D] }
 ├── sparse_vector.rs  # Doublet（类比 faer 的 Triplet）与 try_new_from_doublet → Col<f64>
 ├── element/
@@ -43,6 +42,8 @@ src/
     ├── mod.rs        # （目前为空文件）
     └── gmsh.rs       # GMSH v4.1 网格读取：read_gmsh、GmshMesh、FromGmsh trait
 test/msh/             # 测试用 GMSH 网格（patchtest.msh、patchtest1D.msh，含物理组 "Γᵍ"、"Ω"）
+examples/
+└── bar1d.rs          # 1D 桁架示例：GMSH 读取 + 组装 + 稀疏 Cholesky 求解（注释用英文）
 ```
 
 ### 核心抽象（理解代码前必读）
@@ -54,19 +55,19 @@ test/msh/             # 测试用 GMSH 网格（patchtest.msh、patchtest1D.msh�
 - **`FromGmsh<D>`**（`src/io/gmsh.rs:19`）：单元类型与 GMSH element type 编号的桥接。新增单元接入 GMSH 读取时，在 io 层实现此 trait 即可（当前支持 Seg2=1、Tri3=2、Poi1=15）。
 - **组装风格**：算子返回 `Vec<Triplet<usize, usize, f64>>`（刚度）或 `Vec<Doublet<usize, f64>>`（载荷），由调用方用 `faer::sparse::SparseColMat::try_new_from_triplets` 和 `sparse_vector::try_new_from_doublet` 合并。本质边界条件用**罚函数法**（`displacement_penalty`，罚数 α≈1e7），自然边界条件（体力/集中力）由 `body_force` / `traction` 组装。
 
-`main.rs` 是目前唯一端到端示例：读取 `test/msh/patchtest.msh`，构造 10 个 `Seg2<1>` 组成的 1D 杆（左端固定、均布体力 f=1、右端拉力 P=1），罚函数加约束后 `sp_cholesky` 求解。
+`examples/bar1d.rs` 是目前唯一端到端示例：读取 `test/msh/patchtest.msh`，构造 10 个 `Seg2<1>` 组成的 1D 杆（左端固定、均布体力 f=1、右端拉力 P=1），罚函数加约束后 `sp_cholesky` 求解。
 
 ## 3. 构建与测试命令
 
 ```bash
 cargo build              # 编译库
-cargo run                # 运行 main.rs 中的 1D 桁架 + GMSH 读取示例
+cargo run --example bar1d   # 运行 examples/bar1d.rs 中的 1D 桁架 + GMSH 读取示例
 cargo test               # 运行全部单元测试（目前 13 个，全部内联在各模块的 #[cfg(test)] 中）
 cargo clippy --all-targets  # 静态检查（注意：当前约 91 个警告，PLAN.md 的 M1 目标是清零，请勿新增）
-cargo run --release --features dhat-heap   # 堆剖析；生成 dhat-heap.json（仓库根目录已有一份示例输出）
+cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 dhat-heap.json（仓库根目录已有一份示例输出）
 ```
 
-- 没有 `tests/` 目录、没有 `examples/` 目录、没有 benches；测试全部为模块内 `#[cfg(test)] mod tests`。
+- 没有 `tests/` 目录、没有 benches；示例位于 `examples/` 目录（用 `cargo run --example <name>` 运行）；测试全部为模块内 `#[cfg(test)] mod tests`。
 - 没有 CI（`.github/` 不存在）；PLAN.md M1 计划添加 GitHub Actions（fmt + clippy + test）。
 - 没有部署/发布流程；M6 才计划 crates.io 发布。
 
@@ -79,7 +80,7 @@ cargo run --release --features dhat-heap   # 堆剖析；生成 dhat-heap.json�
 
 ## 5. 代码风格与提交规范
 
-- 所有 rustdoc、注释、提交信息使用**中文**；示例 mesh 的物理组名使用 Unicode（如 `"Γᵍ"`、`"Ω"`）。
+- 源码（`src/` 与 `examples/`）的 rustdoc、注释统一使用**英文**；提交信息使用中文；示例 mesh 的物理组名使用 Unicode（如 `"Γᵍ"`、`"Ω"`）。
 - 大量使用 `const` 泛型（`D/P/N/G`）和返回 `impl Iterator` 的 trait 方法（RPITIT）——新代码应保持这一风格，避免引入运行时动态分发。
 - **提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)**，详见 `PLAN.md` 第 4 节：`type(scope): subject` 格式，type 包括 `feat`/`fix`/`docs`/`style`/`refactor`/`perf`/`test`/`chore`/`build`/`ci`/`revert`，破坏性变更加 `!` 并在 footer 说明。
 - 分支命名：`feat/<scope>-<description>`、`fix/<scope>-<description>`、`docs/<description>`。
@@ -89,7 +90,7 @@ cargo run --release --features dhat-heap   # 堆剖析；生成 dhat-heap.json�
 ## 6. 已知缺口（与 PLAN.md 里程碑对照）
 
 - M1：CI 未配置；`cargo clippy` 有约 91 个警告未清零。
-- M2：`Problem` trait、`Truss1D`、求解器封装尚未建立；`main.rs` 是唯一示例。
+- M2：`Problem` trait、`Truss1D`、求解器封装尚未建立；`examples/bar1d.rs` 是唯一示例。
 - M3/M4：`Tri3`/`Quad4`/`Seg2` 已实现并测试，但尚未有 2D/3D 求解示例；`Material` trait、平面应力/应变问题未实现。
 - M5：尚无 `Solver` trait；`parallel` feature 已声明但未使用；无基准测试。
 - M6：README 未写、CHANGELOG 不存在。

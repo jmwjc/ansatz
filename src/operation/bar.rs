@@ -67,12 +67,14 @@ where
     doublets
 }
 
-/// 施加体力（分布载荷），采用算子形式（单元积分）。
+/// Applies a body force (distributed load) in operator form (element-wise
+/// integration).
 ///
-/// `f` 为体力密度函数（每单位长度的轴向力），对每个单元积分
-/// `Fᵢ = ∫ Nᵢ f dx = Σ_g Nᵢ(ξ_g) f(x_g) |J| w_g`。
-/// 返回 [`Doublet`] 列表，调用方可用 [`crate::sparse_vector::try_new_from_doublet`]
-/// 合并为载荷向量。
+/// `f` is the body force density (axial force per unit length), integrated over
+/// each element:
+/// `Fᵢ = ∫ Nᵢ f dx = Σ_g Nᵢ(ξ_g) f(x_g) |J| w_g`.
+/// Returns a list of [`Doublet`]s that the caller can merge into a load vector
+/// via [`crate::sparse_vector::try_new_from_doublet`].
 pub fn body_force<T, const P: usize, const N: usize, const G: usize>(
     v: &T,
     f: impl Fn([f64; 1]) -> f64,
@@ -100,11 +102,15 @@ where
     doublets
 }
 
-/// 用罚函数法施加位移约束（本质边界条件），采用点单元（[`crate::element::poi1::Poi1`]）表示约束点。
+/// Applies a displacement constraint (essential (Dirichlet) boundary condition)
+/// with the penalty method, using point elements
+/// ([`crate::element::poi1::Poi1`]) to represent the constrained points.
 ///
-/// `penalty` 为罚数，`ū` 为指定位移。`v` 为一组点单元（[`Variable<D, 0, 1>`]），
-/// 每个点单元对应一个约束点，在其上施加 `Kᵢⱼ += α Nᵢ Nⱼ`、`Fᵢ += α Nᵢ ū`。
-/// 返回 `(刚度三元组, [`Doublet`] 载荷项)`。
+/// `penalty` is the penalty parameter and `ū` the prescribed displacement.
+/// `v` is a set of point elements ([`Variable<D, 0, 1>`]); each point element
+/// corresponds to one constrained point, where `Kᵢⱼ += α Nᵢ Nⱼ` and
+/// `Fᵢ += α Nᵢ ū` are applied. Returns a `(stiffness triplets, [`Doublet`]
+/// load terms)` pair.
 pub fn displacement_penalty<T, const D: usize>(
     v: &T,
     penalty: f64,

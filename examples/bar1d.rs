@@ -1,3 +1,7 @@
+// 1D bar (truss) example: GMSH mesh reading + truss assembly + sparse Cholesky solve.
+//
+// Run with: cargo run --example bar1d
+
 #[cfg(feature = "dhat-heap")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
@@ -8,8 +12,6 @@ use faer::sparse::SparseColMat;
 
 use rustfem::element::poi1::Poi1;
 use rustfem::element::seg2::Seg2;
-use rustfem::element::tri3::Tri3;
-use rustfem::io::gmsh;
 use rustfem::node::Node;
 use rustfem::operation::bar::{body_force, displacement_penalty, stiffness, traction};
 use rustfem::sparse_vector::try_new_from_doublet;
@@ -21,14 +23,7 @@ fn main() {
 
     let start = Instant::now();
 
-    // ---------- 1. GMSH reading ----------
-    let mesh = gmsh::read_gmsh::<2>("test/msh/patchtest.msh");
-    let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ");
-    let tris: Vec<Tri3<2>> = mesh.elements("Ω");
-    println!("segments (Γᵍ): {}", segs.len());
-    println!("triangles (Ω): {}", tris.len());
-
-    // ---------- 2. 1D truss assembly + solve ----------
+    // ---------- 1D truss assembly + solve ----------
     // Build a 1D bar made of 10 Seg2<1> elements, fixed at the left end,
     // subject to its own weight (uniform body force f = 1) and a concentrated
     // tensile load P = 1 at the right end.

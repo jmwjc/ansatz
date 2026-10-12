@@ -15,10 +15,11 @@ impl<I, T> Doublet<I, T> {
     }
 }
 
-/// 从 `Doublet` 列表构造稠密向量，重复索引的值累加。
+/// Construct a dense vector from a list of `Doublet`s, accumulating values with duplicate indices.
 ///
-/// `n` 为向量长度（自由度总数）。累加天然无冲突，故直接返回稠密向量
-/// （类比 faer 的 [`faer::sparse::SparseColMat::try_new_from_triplets`]）。
+/// `n` is the vector length (total number of DOFs). Accumulation is naturally conflict-free,
+/// so this returns a dense vector directly (analogous to faer's
+/// [`faer::sparse::SparseColMat::try_new_from_triplets`]).
 pub fn try_new_from_doublet(n: usize, doublets: &[Doublet<usize, f64>]) -> Col<f64> {
     let mut v = Col::<f64>::zeros(n);
     for d in doublets {

@@ -74,8 +74,9 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
         })
     }
 
-    /// 参考三角形到物理三角形的面积比：`JᵀJ` 的行列式的平方根
-    /// （`D = 2` 时即 `|det J|`，`D = 3` 时为两切向量的叉积模）。
+    /// Area ratio between the reference triangle and the physical triangle: the square root
+    /// of the determinant of `JᵀJ` (for `D = 2` this is `|det J|`; for `D = 3` it is the
+    /// norm of the cross product of the two tangent vectors).
     fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
         let j = self.jacobe_mat(parametric_coordinates);
         let aa: f64 = (0..D).map(|i| j[i][0] * j[i][0]).sum();
@@ -84,7 +85,7 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
         (aa * bb - ab * ab).sqrt()
     }
 
-    /// `J[i][0] = ∂x_i/∂ξ`、`J[i][1] = ∂x_i/∂η`（线性三角形为常数）。
+    /// `J[i][0] = ∂x_i/∂ξ`, `J[i][1] = ∂x_i/∂η` (constant for a linear triangle).
     fn jacobe_mat(&self, _parametric_coordinates: [f64; 2]) -> [[f64; 2]; D] {
         std::array::from_fn(|i| {
             [
@@ -107,28 +108,28 @@ mod tests {
 
     #[test]
     fn tri3_shape_and_area() {
-        // 直角三角形 (0,0)、(3,0)、(0,4)：面积 6，jacobe 应为 2×面积 = 12。
+        // Right triangle (0,0), (3,0), (0,4): area 6, jacobe should be 2×area = 12.
         let t = Tri3::new(
             Node::new(0, [0.0, 0.0]),
             Node::new(1, [3.0, 0.0]),
             Node::new(2, [0.0, 4.0]),
         );
         assert_eq!(t.id(), [0, 1, 2]);
-        // 顶点处的形函数取值
+        // Shape function values at the vertices
         assert_eq!(t.shape([0.0, 0.0]), [1.0, 0.0, 0.0]);
         assert_eq!(t.shape([1.0, 0.0]), [0.0, 1.0, 0.0]);
         assert_eq!(t.shape([0.0, 1.0]), [0.0, 0.0, 1.0]);
-        // 形心 (ξ, η) = (1/3, 1/3) 映射到物理形心 (1, 4/3)
+        // Centroid (ξ, η) = (1/3, 1/3) maps to the physical centroid (1, 4/3)
         let c = t.coordinates([1.0 / 3.0, 1.0 / 3.0]);
         assert!(close(c[0], 1.0));
         assert!(close(c[1], 4.0 / 3.0));
-        // jacobe = |det J| = 2×面积 = 12
+        // jacobe = |det J| = 2×area = 12
         assert!(close(t.jacobe([0.0, 0.0]), 12.0));
     }
 
     #[test]
     fn tri3_jacobe_3d() {
-        // 空间三角形 (0,0,0)、(2,0,0)、(0,3,0)：面积 3，jacobe = 2×面积 = 6。
+        // Spatial triangle (0,0,0), (2,0,0), (0,3,0): area 3, jacobe = 2×area = 6.
         let t = Tri3::new(
             Node::new(0, [0.0, 0.0, 0.0]),
             Node::new(1, [2.0, 0.0, 0.0]),

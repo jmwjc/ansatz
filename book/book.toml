@@ -1,0 +1,11 @@
+[book]
+title = "rustfem 文档"
+authors = ["rustfem contributors"]
+language = "zh"
+src = "src"
+
+[build]
+build-dir = "../target/book"
+
+[output.html]
+additional-js = ["mathjax.js"]

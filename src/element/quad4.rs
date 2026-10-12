@@ -90,8 +90,9 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
         std::array::from_fn(|i| (0..4).map(|k| vertices[k][i] * shape[k]).sum())
     }
 
-    /// 参考四边形到物理四边形的面积比：`JᵀJ` 的行列式的平方根
-    /// （`D = 2` 时即 `|det J|`，`D = 3` 时为两切向量的叉积模）。
+    /// Area ratio between the reference and physical quadrilaterals: the square root of
+    /// the determinant of `JᵀJ` (i.e. `|det J|` when `D = 2`; for `D = 3` it is the norm
+    /// of the cross product of the two tangent vectors).
     fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
         let j = self.jacobe_mat(parametric_coordinates);
         let aa: f64 = (0..D).map(|i| j[i][0] * j[i][0]).sum();
@@ -100,7 +101,7 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
         (aa * bb - ab * ab).sqrt()
     }
 
-    /// `J[i][0] = ∂x_i/∂ξ`、`J[i][1] = ∂x_i/∂η`（双线性映射，随 `(ξ, η)` 变化）。
+    /// `J[i][0] = ∂x_i/∂ξ`, `J[i][1] = ∂x_i/∂η` (bilinear mapping, varies with `(ξ, η)`).
     fn jacobe_mat(&self, parametric_coordinates: [f64; 2]) -> [[f64; 2]; D] {
         let ξ = parametric_coordinates[0];
         let η = parametric_coordinates[1];
@@ -137,7 +138,7 @@ mod tests {
 
     #[test]
     fn quad4_shape_and_jacobe() {
-        // 单位正方形 (0,0)、(1,0)、(1,1)、(0,1)：面积 1，jacobe(0,0) = 1/4。
+        // Unit square (0,0), (1,0), (1,1), (0,1): area 1, jacobe(0,0) = 1/4.
         let q = Quad4::new(
             Node::new(0, [0.0, 0.0]),
             Node::new(1, [1.0, 0.0]),
@@ -145,12 +146,12 @@ mod tests {
             Node::new(3, [0.0, 1.0]),
         );
         assert_eq!(q.id(), [0, 1, 2, 3]);
-        // 顶点处的形函数取值
+        // Shape function values at the vertices
         assert_eq!(q.shape([-1.0, -1.0]), [1.0, 0.0, 0.0, 0.0]);
         assert_eq!(q.shape([1.0, -1.0]), [0.0, 1.0, 0.0, 0.0]);
         assert_eq!(q.shape([1.0, 1.0]), [0.0, 0.0, 1.0, 0.0]);
         assert_eq!(q.shape([-1.0, 1.0]), [0.0, 0.0, 0.0, 1.0]);
-        // 形心 (ξ, η) = (0, 0) 映射到物理形心 (0.5, 0.5)
+        // The centroid (ξ, η) = (0, 0) maps to the physical centroid (0.5, 0.5)
         let c = q.coordinates([0.0, 0.0]);
         assert!(close(c[0], 0.5));
         assert!(close(c[1], 0.5));
@@ -160,7 +161,7 @@ mod tests {
 
     #[test]
     fn quad4_jacobe_3d() {
-        // 空间四边形 (0,0,0)、(2,0,0)、(2,3,0)、(0,3,0)：面积 6，jacobe = 6/4 = 1.5。
+        // Spatial quadrilateral (0,0,0), (2,0,0), (2,3,0), (0,3,0): area 6, jacobe = 6/4 = 1.5.
         let q = Quad4::new(
             Node::new(0, [0.0, 0.0, 0.0]),
             Node::new(1, [2.0, 0.0, 0.0]),
