@@ -6,12 +6,27 @@ pub mod tri3;
 pub trait Element<const D: usize, const P: usize, const N: usize> {
     fn id(&self) -> [usize; N];
     fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
-    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
+
+    /// Physical gradient of each shape function with respect to the physical
+    /// coordinates `x`: `∇ₓNᵢ = [∂Nᵢ/∂x₁, …, ∂Nᵢ/∂x_D]`.
+    ///
+    /// The return value is indexed `[node][spatial]`: `N` rows (one per node),
+    /// each a `D`-dimensional vector. This is the *physical* gradient (obtained
+    /// from the parametric gradient via the Jacobian), not the parametric one.
+    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
 
     fn vertices_coordinates(&self) -> [[f64; D]; N];
     fn coordinates(&self, parametric_coordinates: [f64; P]) -> [f64; D];
+
+    /// Volume/area/length scaling factor between the reference and physical
+    /// elements: `|det J|` when `P = D`, the norm of the tangent cross product
+    /// when `P < D`, and `1` when `P = 0`.
     fn jacobe(&self, parametric_coordinates: [f64; P]) -> f64;
-    fn jacobe_mat(&self, parametric_coordinates: [f64; P]) -> [[f64; P]; D];
+
+    /// Jacobian `J` of the isoparametric map, indexed `[parametric][spatial]`:
+    /// `J[a][i] = ∂xᵢ/∂ξₐ`, i.e. one `D`-dimensional tangent vector per
+    /// parametric direction.
+    fn jacobe_mat(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; P];
 }
 
 pub trait IntegrationScheme<const P: usize, const G: usize> {

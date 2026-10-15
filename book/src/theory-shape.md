@@ -85,7 +85,7 @@ $$
 
 ## 形函数的导数
 
-弱形式里出现的是 `dN/dx`（物理导数），而形函数是参数坐标 $ξ$ 的函数，两者通过**链式法则 + 雅可比**联系，这正是下一章的内容。`rustfem` 中：
+弱形式里出现的是物理梯度 $\nabla_x N$，而形函数是参数坐标 $ξ$ 的函数，两者通过**链式法则 + 雅可比**联系，这正是下一章的内容。`rustfem` 中：
 
-- 1D 单元 `Seg2::derivative_shape` 直接返回物理导数 `dN/dx`；
-- 2D 单元 `Tri3`/`Quad4` 的 `derivative_shape` 只返回 $∂N/∂ξ$，完整梯度需结合雅可比矩阵另行计算。
+- `derivative_shape` 返回**物理梯度** $\nabla_x N = [\partial N/\partial x_1, \dots, \partial N/\partial x_D]$（关于物理坐标求导，而非参数坐标），类型为 `[[f64; D]; N]`；
+- 各单元通过雅可比矩阵 $J = \partial x/\partial \xi$ 把参数导数变换为物理梯度：线单元取切向投影 $\nabla_x N = \pm \hat t/L$，面单元用 $\nabla_x N = J(J^\mathsf T J)^{-1} \nabla_\xi N$。

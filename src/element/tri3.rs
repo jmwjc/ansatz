@@ -49,13 +49,35 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
         [1.0 - ξ - η, ξ, η]
     }
 
-    /// Partial derivative with respect to the first parametric coordinate `ξ`, `∂N/∂ξ`.
-    ///
-    /// Note: the `Element` trait method returns `[f64; N]`, which cannot hold the full
-    /// gradient of a 2D element; the derivative with respect to `η` and the physical
-    /// gradient must be obtained separately, combined with [`Self::jacobe_mat`].
-    fn derivative_shape(&self, _parametric_coordinates: [f64; 2]) -> [f64; 3] {
-        [-1.0, 1.0, 0.0]
+    /// Physical gradient of the area-coordinate shape functions, computed
+    /// directly via the metric tensor: `∇ₓN = j_α g^{αβ} ∂_β N`. Valid for
+    /// both `D = 2` (plane triangle) and `D = 3` (spatial triangle).
+    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 3] {
+        let j = self.jacobe_mat(parametric_coordinates);
+        let j0 = &j[0]; // ∂x/∂ξ
+        let j1 = &j[1]; // ∂x/∂η
+
+        // Metric tensor g_{αβ} = j_α · j_β.
+        let g00: f64 = j0.iter().map(|v| v * v).sum();
+        let g01: f64 = j0.iter().zip(j1).map(|(a, b)| a * b).sum();
+        let g11: f64 = j1.iter().map(|v| v * v).sum();
+        let det = g00 * g11 - g01 * g01;
+
+        // Inverse metric g^{αβ}.
+        let gi00 = g11 / det;
+        let gi01 = -g01 / det;
+        let gi11 = g00 / det;
+
+        // Parametric gradients ∂_β N_a = (∂N_a/∂ξ, ∂N_a/∂η).
+        let dn: [[f64; 2]; 3] = [[-1.0, -1.0], [1.0, 0.0], [0.0, 1.0]];
+
+        // ∇ₓN_a = j_ξ (g^{ξξ}∂_ξN + g^{ξη}∂_ηN) + j_η (g^{ηξ}∂_ξN + g^{ηη}∂_ηN).
+        std::array::from_fn(|a| {
+            let (dξ, dη) = (dn[a][0], dn[a][1]);
+            let c0 = gi00 * dξ + gi01 * dη;
+            let c1 = gi01 * dξ + gi11 * dη;
+            std::array::from_fn(|i| j0[i] * c0 + j1[i] * c1)
+        })
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 3] {
@@ -79,20 +101,18 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
     /// norm of the cross product of the two tangent vectors).
     fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
         let j = self.jacobe_mat(parametric_coordinates);
-        let aa: f64 = (0..D).map(|i| j[i][0] * j[i][0]).sum();
-        let bb: f64 = (0..D).map(|i| j[i][1] * j[i][1]).sum();
-        let ab: f64 = (0..D).map(|i| j[i][0] * j[i][1]).sum();
+        let aa: f64 = j[0].iter().map(|v| v * v).sum();
+        let bb: f64 = j[1].iter().map(|v| v * v).sum();
+        let ab: f64 = j[0].iter().zip(j[1]).map(|(a, b)| a * b).sum();
         (aa * bb - ab * ab).sqrt()
     }
 
-    /// `J[i][0] = ∂x_i/∂ξ`, `J[i][1] = ∂x_i/∂η` (constant for a linear triangle).
-    fn jacobe_mat(&self, _parametric_coordinates: [f64; 2]) -> [[f64; 2]; D] {
-        std::array::from_fn(|i| {
-            [
-                self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i],
-                self.nodes[2].coordinates[i] - self.nodes[0].coordinates[i],
-            ]
-        })
+    /// `J[0][i] = ∂x_i/∂ξ`, `J[1][i] = ∂x_i/∂η` (constant for a linear triangle).
+    fn jacobe_mat(&self, _parametric_coordinates: [f64; 2]) -> [[f64; D]; 2] {
+        [
+            std::array::from_fn(|i| self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i]),
+            std::array::from_fn(|i| self.nodes[2].coordinates[i] - self.nodes[0].coordinates[i]),
+        ]
     }
 }
 
@@ -136,5 +156,44 @@ mod tests {
             Node::new(2, [0.0, 3.0, 0.0]),
         );
         assert!(close(t.jacobe([0.0, 0.0]), 6.0));
+    }
+
+    #[test]
+    fn tri3_physical_gradient() {
+        // Right triangle (0,0), (3,0), (0,4): physical gradients
+        // ∇N1 = (-1/3, -1/4), ∇N2 = (1/3, 0), ∇N3 = (0, 1/4).
+        let t = Tri3::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 0.0]),
+            Node::new(2, [0.0, 4.0]),
+        );
+        let g = t.derivative_shape([0.0, 0.0]);
+        assert!(close(g[0][0], -1.0 / 3.0));
+        assert!(close(g[0][1], -1.0 / 4.0));
+        assert!(close(g[1][0], 1.0 / 3.0));
+        assert!(close(g[1][1], 0.0));
+        assert!(close(g[2][0], 0.0));
+        assert!(close(g[2][1], 1.0 / 4.0));
+    }
+
+    #[test]
+    fn tri3_physical_gradient_3d() {
+        // Spatial triangle (0,0,0), (2,0,0), (0,3,0): physical gradients
+        // ∇N1 = (-1/2, -1/3, 0), ∇N2 = (1/2, 0, 0), ∇N3 = (0, 1/3, 0).
+        let t = Tri3::new(
+            Node::new(0, [0.0, 0.0, 0.0]),
+            Node::new(1, [2.0, 0.0, 0.0]),
+            Node::new(2, [0.0, 3.0, 0.0]),
+        );
+        let g = t.derivative_shape([0.0, 0.0]);
+        assert!(close(g[0][0], -0.5));
+        assert!(close(g[0][1], -1.0 / 3.0));
+        assert!(close(g[0][2], 0.0));
+        assert!(close(g[1][0], 0.5));
+        assert!(close(g[1][1], 0.0));
+        assert!(close(g[1][2], 0.0));
+        assert!(close(g[2][0], 0.0));
+        assert!(close(g[2][1], 1.0 / 3.0));
+        assert!(close(g[2][2], 0.0));
     }
 }

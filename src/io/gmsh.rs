@@ -4,6 +4,7 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::element::poi1::Poi1;
+use crate::element::quad4::Quad4;
 use crate::element::seg2::Seg2;
 use crate::element::tri3::Tri3;
 use crate::node::Node;
@@ -44,6 +45,18 @@ impl<const D: usize> FromGmsh<D> for Tri3<D> {
         let n2 = nodes.get(node_ids.get(1)?)?;
         let n3 = nodes.get(node_ids.get(2)?)?;
         Some(Tri3::new(n1.clone(), n2.clone(), n3.clone()))
+    }
+}
+
+impl<const D: usize> FromGmsh<D> for Quad4<D> {
+    const GMSH_ELEMENT_TYPE: i32 = 3; // 4-node quadrangle
+
+    fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self> {
+        let n1 = nodes.get(node_ids.get(0)?)?;
+        let n2 = nodes.get(node_ids.get(1)?)?;
+        let n3 = nodes.get(node_ids.get(2)?)?;
+        let n4 = nodes.get(node_ids.get(3)?)?;
+        Some(Quad4::new(n1.clone(), n2.clone(), n3.clone(), n4.clone()))
     }
 }
 
@@ -401,7 +414,7 @@ fn read_nodes_v4<const D: usize>(
                 for d in 0..ncoords {
                     coords[d] = toks[d].parse().expect("invalid node coordinate");
                 }
-                nodes.insert(tags[i], crate::node::Node::new(tags[i], coords));
+                nodes.insert(tags[i] - 1, crate::node::Node::new(tags[i] - 1, coords));
             }
         } else {
             // Compact format: each line is "tag x y z".
@@ -413,7 +426,7 @@ fn read_nodes_v4<const D: usize>(
                     .parse()
                     .expect("invalid node coordinate");
             }
-            nodes.insert(first_id, crate::node::Node::new(first_id, first_coords));
+            nodes.insert(first_id - 1, crate::node::Node::new(first_id - 1, first_coords));
 
             for _node_idx in 1..num_nodes_in_block {
                 line.clear();
@@ -425,7 +438,7 @@ fn read_nodes_v4<const D: usize>(
                 for d in 0..n {
                     coords[d] = toks[1 + d].parse().expect("invalid node coordinate");
                 }
-                nodes.insert(id, crate::node::Node::new(id, coords));
+                nodes.insert(id - 1, crate::node::Node::new(id - 1, coords));
             }
         }
     }
@@ -497,7 +510,7 @@ fn read_elements_v4(
             // elementTag nodeTag1 nodeTag2 ...
             let node_ids: Vec<usize> = tokens[1..]
                 .iter()
-                .map(|s| s.parse().expect("invalid node tag"))
+                .map(|s| s.parse::<usize>().expect("invalid node tag") - 1)
                 .collect();
             block.connectivity.push(node_ids);
         }
@@ -517,10 +530,11 @@ fn read_elements_v4(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::element::Element;
 
     #[test]
     fn reads_segments_and_triangles() {
-        let mesh = read_gmsh::<2>("test/msh/patchtest.msh");
+        let mesh = read_gmsh::<2>("examples/msh/patchtest_tri3.msh");
         let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ");
         assert_eq!(segs.len(), 40, "expected 40 segment elements");
         let tris: Vec<Tri3<2>> = mesh.elements("Ω");
@@ -528,8 +542,19 @@ mod tests {
     }
 
     #[test]
+    fn quad4_from_gmsh() {
+        let mut nodes = HashMap::new();
+        nodes.insert(0, Node::new(0, [0.0, 0.0]));
+        nodes.insert(1, Node::new(1, [1.0, 0.0]));
+        nodes.insert(2, Node::new(2, [1.0, 1.0]));
+        nodes.insert(3, Node::new(3, [0.0, 1.0]));
+        let q = Quad4::from_gmsh(&[0, 1, 2, 3], &nodes).unwrap();
+        assert_eq!(q.id(), [0, 1, 2, 3]);
+    }
+
+    #[test]
     fn reads_points_and_segments() {
-        let mesh = read_gmsh::<1>("test/msh/patchtest1D.msh");
+        let mesh = read_gmsh::<1>("examples/msh/bar1d.msh");
         // phys 0 (unnamed) → 2 point elements; phys 1 "line" → 1 segment element.
         let points: Vec<Poi1<1>> = mesh.elements_by_tag(0);
         assert_eq!(points.len(), 2, "expected 2 point elements");

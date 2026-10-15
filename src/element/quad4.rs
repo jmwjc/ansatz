@@ -60,19 +60,42 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
         ]
     }
 
-    /// Partial derivative with respect to the first parametric coordinate: `∂N/∂ξ`.
-    ///
-    /// Note: `Element`'s method returns `[f64; N]`, which cannot hold the full gradient
-    /// of a 2D element; the derivative with respect to `η` and the physical gradient
-    /// must be obtained separately, e.g. via [`Self::jacobe_mat`].
-    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [f64; 4] {
+    /// Physical gradient of the bilinear shape functions, computed directly via
+    /// the metric tensor: `∇ₓN = j_α g^{αβ} ∂_β N`. Valid for both `D = 2`
+    /// (plane quadrilateral) and `D = 3` (spatial quadrilateral).
+    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 4] {
+        let j = self.jacobe_mat(parametric_coordinates);
+        let j0 = &j[0]; // ∂x/∂ξ
+        let j1 = &j[1]; // ∂x/∂η
+
+        // Metric tensor g_{αβ} = j_α · j_β.
+        let g00: f64 = j0.iter().map(|v| v * v).sum();
+        let g01: f64 = j0.iter().zip(j1).map(|(a, b)| a * b).sum();
+        let g11: f64 = j1.iter().map(|v| v * v).sum();
+        let det = g00 * g11 - g01 * g01;
+
+        // Inverse metric g^{αβ}.
+        let gi00 = g11 / det;
+        let gi01 = -g01 / det;
+        let gi11 = g00 / det;
+
+        // Parametric gradients ∂_β N_a = (∂N_a/∂ξ, ∂N_a/∂η).
+        let ξ = parametric_coordinates[0];
         let η = parametric_coordinates[1];
-        [
-            -0.25 * (1.0 - η),
-            0.25 * (1.0 - η),
-            0.25 * (1.0 + η),
-            -0.25 * (1.0 + η),
-        ]
+        let dn: [[f64; 2]; 4] = [
+            [-0.25 * (1.0 - η), -0.25 * (1.0 - ξ)],
+            [0.25 * (1.0 - η), -0.25 * (1.0 + ξ)],
+            [0.25 * (1.0 + η), 0.25 * (1.0 + ξ)],
+            [-0.25 * (1.0 + η), 0.25 * (1.0 - ξ)],
+        ];
+
+        // ∇ₓN_a = j_ξ (g^{ξξ}∂_ξN + g^{ξη}∂_ηN) + j_η (g^{ηξ}∂_ξN + g^{ηη}∂_ηN).
+        std::array::from_fn(|a| {
+            let (dξ, dη) = (dn[a][0], dn[a][1]);
+            let c0 = gi00 * dξ + gi01 * dη;
+            let c1 = gi01 * dξ + gi11 * dη;
+            std::array::from_fn(|i| j0[i] * c0 + j1[i] * c1)
+        })
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 4] {
@@ -95,14 +118,14 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
     /// of the cross product of the two tangent vectors).
     fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
         let j = self.jacobe_mat(parametric_coordinates);
-        let aa: f64 = (0..D).map(|i| j[i][0] * j[i][0]).sum();
-        let bb: f64 = (0..D).map(|i| j[i][1] * j[i][1]).sum();
-        let ab: f64 = (0..D).map(|i| j[i][0] * j[i][1]).sum();
+        let aa: f64 = j[0].iter().map(|v| v * v).sum();
+        let bb: f64 = j[1].iter().map(|v| v * v).sum();
+        let ab: f64 = j[0].iter().zip(j[1]).map(|(a, b)| a * b).sum();
         (aa * bb - ab * ab).sqrt()
     }
 
-    /// `J[i][0] = ∂x_i/∂ξ`, `J[i][1] = ∂x_i/∂η` (bilinear mapping, varies with `(ξ, η)`).
-    fn jacobe_mat(&self, parametric_coordinates: [f64; 2]) -> [[f64; 2]; D] {
+    /// `J[0][i] = ∂x_i/∂ξ`, `J[1][i] = ∂x_i/∂η` (bilinear mapping, varies with `(ξ, η)`).
+    fn jacobe_mat(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 2] {
         let ξ = parametric_coordinates[0];
         let η = parametric_coordinates[1];
         let dn_dξ = [
@@ -117,12 +140,14 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
             0.25 * (1.0 + ξ),
             0.25 * (1.0 - ξ),
         ];
-        std::array::from_fn(|i| {
-            [
-                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dξ[k]).sum(),
-                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dη[k]).sum(),
-            ]
-        })
+        [
+            std::array::from_fn(|i| {
+                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dξ[k]).sum()
+            }),
+            std::array::from_fn(|i| {
+                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dη[k]).sum()
+            }),
+        ]
     }
 }
 
@@ -169,5 +194,51 @@ mod tests {
             Node::new(3, [0.0, 3.0, 0.0]),
         );
         assert!(close(q.jacobe([0.0, 0.0]), 1.5));
+    }
+
+    #[test]
+    fn quad4_physical_gradient() {
+        // Unit square at its centroid: ∇N = (±1/2, ±1/2).
+        let q = Quad4::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [1.0, 0.0]),
+            Node::new(2, [1.0, 1.0]),
+            Node::new(3, [0.0, 1.0]),
+        );
+        let g = q.derivative_shape([0.0, 0.0]);
+        assert!(close(g[0][0], -0.5));
+        assert!(close(g[0][1], -0.5));
+        assert!(close(g[1][0], 0.5));
+        assert!(close(g[1][1], -0.5));
+        assert!(close(g[2][0], 0.5));
+        assert!(close(g[2][1], 0.5));
+        assert!(close(g[3][0], -0.5));
+        assert!(close(g[3][1], 0.5));
+    }
+
+    #[test]
+    fn quad4_physical_gradient_3d() {
+        // Spatial quadrilateral (0,0,0), (2,0,0), (2,3,0), (0,3,0) at its
+        // centroid: ∇N1 = (-1/4, -1/6, 0), ∇N2 = (1/4, -1/6, 0),
+        // ∇N3 = (1/4, 1/6, 0), ∇N4 = (-1/4, 1/6, 0).
+        let q = Quad4::new(
+            Node::new(0, [0.0, 0.0, 0.0]),
+            Node::new(1, [2.0, 0.0, 0.0]),
+            Node::new(2, [2.0, 3.0, 0.0]),
+            Node::new(3, [0.0, 3.0, 0.0]),
+        );
+        let g = q.derivative_shape([0.0, 0.0]);
+        assert!(close(g[0][0], -0.25));
+        assert!(close(g[0][1], -1.0 / 6.0));
+        assert!(close(g[0][2], 0.0));
+        assert!(close(g[1][0], 0.25));
+        assert!(close(g[1][1], -1.0 / 6.0));
+        assert!(close(g[1][2], 0.0));
+        assert!(close(g[2][0], 0.25));
+        assert!(close(g[2][1], 1.0 / 6.0));
+        assert!(close(g[2][2], 0.0));
+        assert!(close(g[3][0], -0.25));
+        assert!(close(g[3][1], 1.0 / 6.0));
+        assert!(close(g[3][2], 0.0));
     }
 }

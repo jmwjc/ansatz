@@ -18,6 +18,7 @@
 - [数值积分](./theory-quadrature.md)
 - [单元刚度与全局组装](./theory-assembly.md)
 - [边界条件与罚函数法](./theory-bc.md)
+- [热传导方程（Heat Equation）](./theory-heat.md)
 
 # 第三部分：算例
 

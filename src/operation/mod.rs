@@ -1,4 +1,5 @@
 pub mod bar;
+pub mod heat;
 
 use crate::element::Element;
 

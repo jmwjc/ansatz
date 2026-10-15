@@ -34,9 +34,10 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
         [1.0]
     }
 
-    /// The shape function is constant, so its derivative is 0.
-    fn derivative_shape(&self, _parametric_coordinates: [f64; 0]) -> [f64; 1] {
-        [0.0]
+    /// The shape function is constant, so its physical gradient is the zero
+    /// `D`-dimensional vector.
+    fn derivative_shape(&self, _parametric_coordinates: [f64; 0]) -> [[f64; D]; 1] {
+        [[0.0; D]; 1]
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 1] {
@@ -52,9 +53,10 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
         1.0
     }
 
-    /// The Jacobian matrix from the zero-dimensional parametric space to the D-dimensional physical space is an empty `D × 0` matrix.
-    fn jacobe_mat(&self, _parametric_coordinates: [f64; 0]) -> [[f64; 0]; D] {
-        std::array::from_fn(|_| [])
+    /// The Jacobian of a point element has no parametric directions: an empty
+    /// `0 × D` matrix.
+    fn jacobe_mat(&self, _parametric_coordinates: [f64; 0]) -> [[f64; D]; 0] {
+        []
     }
 }
 
@@ -69,7 +71,7 @@ mod tests {
         let p = Poi1::new(Node::new(3, [1.0, 2.0]));
         assert_eq!(p.id(), [3]);
         assert_eq!(p.shape([]), [1.0]);
-        assert_eq!(p.derivative_shape([]), [0.0]);
+        assert_eq!(p.derivative_shape([]), [[0.0, 0.0]]);
         assert_eq!(p.coordinates([]), [1.0, 2.0]);
         assert_eq!(p.jacobe([]), 1.0);
     }

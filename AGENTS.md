@@ -85,6 +85,7 @@ cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 
 - **提交信息遵循 [Conventional Commits](https://www.conventionalcommits.org/)**，详见 `PLAN.md` 第 4 节：`type(scope): subject` 格式，type 包括 `feat`/`fix`/`docs`/`style`/`refactor`/`perf`/`test`/`chore`/`build`/`ci`/`revert`，破坏性变更加 `!` 并在 footer 说明。
 - 分支命名：`feat/<scope>-<description>`、`fix/<scope>-<description>`、`docs/<description>`。
 - 设计原则（PLAN.md 第 5 节）：trait 优先、最小化修改、测试驱动、文档同步、性能可测。
+- **几何量优先使用张量表示**：物理梯度、雅可比等几何量的推导与实现优先采用张量记号——协变切向量 `j_α = ∂x/∂ξ^α`、度量张量 `g_{αβ} = j_α · j_β`、逆度量 `g^{αβ}`，物理梯度即 `∇ₓN = j_α g^{αβ} ∂_β N`（对重复指标求和）。这样对任意空间维度 `D`（含高维嵌入，如空间三角形/四边形嵌入 3D）自然成立，无需引入运行时辅助函数或显式矩阵求逆。参考 `Tri3`/`Quad4` 的 `derivative_shape` 实现。
 - 注意：`src/io/mod.rs` 当前为空（0 字节），属正常状态；`jacobe` 等既有命名（含非常规拼写）是有意保留的，不要"修正"它们，以免破坏 API 一致性。
 
 ## 6. 已知缺口（与 PLAN.md 里程碑对照）

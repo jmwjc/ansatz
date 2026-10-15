@@ -32,9 +32,9 @@ where
             for i in 0..N {
                 for j in 0..i + 1 {
                     triplets.push(Triplet::new(
-                        id[i],
-                        id[j],
-                        ea * dshape[i] * dshape[j] * jacobe * wg,
+                        id[i].max(id[j]),
+                        id[i].min(id[j]),
+                        ea * dshape[i][0] * dshape[j][0] * jacobe * wg,
                     ));
                 }
             }

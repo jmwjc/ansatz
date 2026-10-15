@@ -1,4 +1,4 @@
-// 1D bar (truss) example: GMSH mesh reading + truss assembly + sparse Cholesky solve.
+// 1D bar example
 //
 // Run with: cargo run --example bar1d
 

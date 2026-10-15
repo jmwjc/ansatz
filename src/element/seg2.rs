@@ -40,9 +40,17 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
         let ξ = parametric_coordinates[0];
         [0.5 * (1.0 - ξ), 0.5 * (1.0 + ξ)]
     }
-    fn derivative_shape(&self, parametric_coordinates: [f64; 1]) -> [f64; 2] {
+    /// Physical gradient of the linear shape functions: `∇ₓN₁ = -(x₂-x₁)/L²`,
+    /// `∇ₓN₂ = (x₂-x₁)/L²`, i.e. `±t̂/L` where `t̂` is the unit tangent.
+    fn derivative_shape(&self, parametric_coordinates: [f64; 1]) -> [[f64; D]; 2] {
         let l = 2.0 * self.jacobe(parametric_coordinates);
-        [-1.0 / l, 1.0 / l]
+        let l2 = l * l;
+        std::array::from_fn(|node| {
+            std::array::from_fn(|i| {
+                let t = (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i]) / l2;
+                if node == 0 { -t } else { t }
+            })
+        })
     }
     fn vertices_coordinates(&self) -> [[f64; D]; 2] {
         [self.nodes[0].coordinates, self.nodes[1].coordinates]
@@ -61,9 +69,32 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
             .sqrt()
             * 0.5
     }
-    fn jacobe_mat(&self, _parametric_coordinates: [f64; 1]) -> [[f64; 1]; D] {
-        std::array::from_fn(|i| {
-            [0.5 * (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i])]
-        })
+    fn jacobe_mat(&self, _parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
+        [std::array::from_fn(|i| {
+            0.5 * (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i])
+        })]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Seg2;
+    use crate::element::Element;
+    use crate::node::Node;
+
+    fn close(a: f64, b: f64) -> bool {
+        (a - b).abs() < 1e-12
+    }
+
+    #[test]
+    fn seg2_physical_gradient() {
+        // Line element from (0,0) to (3,4), length L = 5.
+        // ∇N1 = -(3,4)/25, ∇N2 = (3,4)/25.
+        let s = Seg2::new(Node::new(0, [0.0, 0.0]), Node::new(1, [3.0, 4.0]));
+        let g = s.derivative_shape([0.0]);
+        assert!(close(g[0][0], -3.0 / 25.0));
+        assert!(close(g[0][1], -4.0 / 25.0));
+        assert!(close(g[1][0], 3.0 / 25.0));
+        assert!(close(g[1][1], 4.0 / 25.0));
     }
 }
