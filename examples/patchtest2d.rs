@@ -47,7 +47,7 @@ where
     let mut doublets = Vec::new();
 
     // Prescribed boundary temperature, integrated over the boundary segments.
-    let (ptt, ptd) = temperature_penalty(&segs, alpha, &exact);
+    let (ptt, ptd) = temperature_penalty(&segs, alpha, exact);
     triplets.extend(ptt);
     doublets.extend(ptd);
 

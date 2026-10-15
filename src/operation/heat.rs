@@ -10,10 +10,8 @@
 //! [`crate::element::IntegrationScheme`] abstractions; see
 //! `book/src/theory-heat.md` for the underlying theory.
 
-use crate::element::Element;
-use crate::element::FullIntegration;
-use crate::element::IntegrationScheme;
-use crate::operation::Variable;
+use crate::element::{Element, FullIntegration, IntegrationScheme};
+use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
 
@@ -32,12 +30,12 @@ use faer::sparse::Triplet;
 pub fn conduction_stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     k: f64,
-) -> Vec<Triplet<usize, usize, f64>>
+) -> Triplets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
-    let mut triplets: Vec<Triplet<usize, usize, f64>> = Vec::with_capacity(N * (N + 1) / 2 * G);
+    let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
     let ξ = T::Item::points();
     let w = T::Item::weights();
     for elm in v.iter() {
@@ -76,12 +74,12 @@ where
 pub fn capacity<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     rho_cp: f64,
-) -> Vec<Triplet<usize, usize, f64>>
+) -> Triplets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
-    let mut triplets: Vec<Triplet<usize, usize, f64>> = Vec::with_capacity(N * (N + 1) / 2 * G);
+    let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
     let ξ = T::Item::points();
     let w = T::Item::weights();
     for elm in v.iter() {
@@ -119,7 +117,7 @@ where
 pub fn heat_source<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     q: impl Fn([f64; D]) -> f64,
-) -> Vec<Doublet<usize, f64>>
+) -> Doublets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
@@ -159,7 +157,7 @@ where
 pub fn heat_flux<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     qn: f64,
-) -> Vec<Doublet<usize, f64>>
+) -> Doublets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
@@ -200,7 +198,7 @@ pub fn temperature_penalty<T, const D: usize, const P: usize, const N: usize, co
     v: &T,
     penalty: f64,
     td: impl Fn([f64; D]) -> f64,
-) -> (Vec<Triplet<usize, usize, f64>>, Vec<Doublet<usize, f64>>)
+) -> TripletsAndDoublets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
@@ -253,7 +251,7 @@ pub fn convection<T, const D: usize, const P: usize, const N: usize, const G: us
     v: &T,
     h: f64,
     t_inf: f64,
-) -> (Vec<Triplet<usize, usize, f64>>, Vec<Doublet<usize, f64>>)
+) -> TripletsAndDoublets
 where
     T: Variable<D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
@@ -361,9 +359,9 @@ mod tests {
     use crate::element::seg2::Seg2;
     use crate::node::Node;
     use crate::sparse_vector::try_new_from_doublet;
+    use faer::Side;
     use faer::prelude::*;
     use faer::sparse::SparseColMat;
-    use faer::Side;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-5
@@ -632,8 +630,10 @@ mod tests {
     fn conduction_stiffness_segment_in_2d() {
         // A Seg2<2> line element in 2D space, nodes (0,0) and (3,4), length L = 5.
         // K^e = (k/L) [[1, -1], [-1, 1]] = [[0.2, -0.2], [-0.2, 0.2]] for k = 1.
-        let bars: Vec<Seg2<2>> =
-            vec![Seg2::new(Node::new(0, [0.0, 0.0]), Node::new(1, [3.0, 4.0]))];
+        let bars: Vec<Seg2<2>> = vec![Seg2::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 4.0]),
+        )];
         let triplets = conduction_stiffness(&bars, 1.0);
 
         let mut k00 = 0.0;
@@ -656,8 +656,10 @@ mod tests {
     fn heat_source_segment_in_2d() {
         // A Seg2<2> line element of length L = 5 with uniform source q = 1.
         // Fᵢ += ∫ Nᵢ q dx = q (L/2) [1, 1] = [2.5, 2.5].
-        let bars: Vec<Seg2<2>> =
-            vec![Seg2::new(Node::new(0, [0.0, 0.0]), Node::new(1, [3.0, 4.0]))];
+        let bars: Vec<Seg2<2>> = vec![Seg2::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 4.0]),
+        )];
         let doublets = heat_source(&bars, |_| 1.0);
 
         let mut f0 = 0.0;

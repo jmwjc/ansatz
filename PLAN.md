@@ -46,8 +46,8 @@
 
 - [ ] 清零 `cargo clippy --all-targets` 警告（当前约 91 个；修复时遵循"最小化修改"，不引入行为变化）；
 - [ ] 配置 `.github/workflows/ci.yml`（rustfmt --check + clippy --all-targets -- -D warnings + cargo test）；
-- [ ] 精简 `main.rs`：求解逻辑全部下沉到库，`main.rs` 只保留示例调用；
-- [ ] 为端到端 1D 桁架示例补回归测试（锚定当前数值结果）。
+- [x] 精简 `main.rs`：求解逻辑全部下沉到库，`main.rs` 只保留示例调用；
+- [x] 为端到端 1D 桁架示例补回归测试（锚定当前数值结果）。
 
 ### M2：问题抽象与求解器封装（第 2 周）
 

@@ -31,7 +31,7 @@ impl<const D: usize> FromGmsh<D> for Seg2<D> {
     const GMSH_ELEMENT_TYPE: i32 = 1; // 2-node line
 
     fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self> {
-        let n1 = nodes.get(node_ids.get(0)?)?;
+        let n1 = nodes.get(node_ids.first()?)?;
         let n2 = nodes.get(node_ids.get(1)?)?;
         Some(Seg2::new(n1.clone(), n2.clone()))
     }
@@ -41,7 +41,7 @@ impl<const D: usize> FromGmsh<D> for Tri3<D> {
     const GMSH_ELEMENT_TYPE: i32 = 2; // 3-node triangle
 
     fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self> {
-        let n1 = nodes.get(node_ids.get(0)?)?;
+        let n1 = nodes.get(node_ids.first()?)?;
         let n2 = nodes.get(node_ids.get(1)?)?;
         let n3 = nodes.get(node_ids.get(2)?)?;
         Some(Tri3::new(n1.clone(), n2.clone(), n3.clone()))
@@ -52,7 +52,7 @@ impl<const D: usize> FromGmsh<D> for Quad4<D> {
     const GMSH_ELEMENT_TYPE: i32 = 3; // 4-node quadrangle
 
     fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self> {
-        let n1 = nodes.get(node_ids.get(0)?)?;
+        let n1 = nodes.get(node_ids.first()?)?;
         let n2 = nodes.get(node_ids.get(1)?)?;
         let n3 = nodes.get(node_ids.get(2)?)?;
         let n4 = nodes.get(node_ids.get(3)?)?;
@@ -64,7 +64,7 @@ impl<const D: usize> FromGmsh<D> for Poi1<D> {
     const GMSH_ELEMENT_TYPE: i32 = 15; // 1-node point
 
     fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self> {
-        let n1 = nodes.get(node_ids.get(0)?)?;
+        let n1 = nodes.get(node_ids.first()?)?;
         Some(Poi1::new(n1.clone()))
     }
 }
@@ -405,7 +405,7 @@ fn read_nodes_v4<const D: usize>(
                 }
             }
             // Now read coordinates.
-            for i in 0..num_nodes_in_block {
+            for tag in tags.iter().take(num_nodes_in_block) {
                 line.clear();
                 reader.read_line(&mut line).expect("I/O error");
                 let toks: Vec<&str> = line.split_whitespace().collect();
@@ -414,7 +414,7 @@ fn read_nodes_v4<const D: usize>(
                 for d in 0..ncoords {
                     coords[d] = toks[d].parse().expect("invalid node coordinate");
                 }
-                nodes.insert(tags[i] - 1, crate::node::Node::new(tags[i] - 1, coords));
+                nodes.insert(*tag - 1, crate::node::Node::new(*tag - 1, coords));
             }
         } else {
             // Compact format: each line is "tag x y z".

@@ -62,7 +62,7 @@ fn main() {
     let llt = k.sp_cholesky(Side::Lower).unwrap();
     let d = llt.solve(&f);
 
-    println!("bar displacement: {:?}", d);
+    println!("bar displacement: {d:?}");
 
     println!("Time elapsed: {:?}", start.elapsed());
 }

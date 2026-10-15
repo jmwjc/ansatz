@@ -1,7 +1,5 @@
-use crate::element::Element;
-use crate::element::FullIntegration;
-use crate::element::IntegrationScheme;
-use crate::operation::Variable;
+use crate::element::{Element, FullIntegration, IntegrationScheme};
+use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
 
@@ -11,15 +9,12 @@ use faer::sparse::Triplet;
 /// `ea` is the axial stiffness (Young's modulus × cross-sectional area).
 /// `v` is a set of 1D elements (implementing [`Variable<1, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`].
-pub fn stiffness<T, const P: usize, const N: usize, const G: usize>(
-    v: &T,
-    ea: f64,
-) -> Vec<Triplet<usize, usize, f64>>
+pub fn stiffness<T, const P: usize, const N: usize, const G: usize>(v: &T, ea: f64) -> Triplets
 where
     T: Variable<1, P, N>,
     T::Item: Element<1, P, N> + FullIntegration<P, G>,
 {
-    let mut triplets: Vec<Triplet<usize, usize, f64>> = Vec::with_capacity(N * (N + 1) / 2 * G);
+    let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
     let ξ = T::Item::points();
     let w = T::Item::weights();
     for elm in v.iter() {
@@ -51,7 +46,7 @@ where
 /// where `Fᵢ += Nᵢ P` is applied. Returns a list of [`Doublet`]s that the
 /// caller can merge into a load vector via
 /// [`crate::sparse_vector::try_new_from_doublet`].
-pub fn traction<T, const D: usize>(v: &T, p: f64) -> Vec<Doublet<usize, f64>>
+pub fn traction<T, const D: usize>(v: &T, p: f64) -> Doublets
 where
     T: Variable<D, 0, 1>,
     T::Item: Element<D, 0, 1>,
@@ -78,7 +73,7 @@ where
 pub fn body_force<T, const P: usize, const N: usize, const G: usize>(
     v: &T,
     f: impl Fn([f64; 1]) -> f64,
-) -> Vec<Doublet<usize, f64>>
+) -> Doublets
 where
     T: Variable<1, P, N>,
     T::Item: Element<1, P, N> + FullIntegration<P, G>,
@@ -111,11 +106,7 @@ where
 /// corresponds to one constrained point, where `Kᵢⱼ += α Nᵢ Nⱼ` and
 /// `Fᵢ += α Nᵢ ū` are applied. Returns a `(stiffness triplets, [`Doublet`]
 /// load terms)` pair.
-pub fn displacement_penalty<T, const D: usize>(
-    v: &T,
-    penalty: f64,
-    u: f64,
-) -> (Vec<Triplet<usize, usize, f64>>, Vec<Doublet<usize, f64>>)
+pub fn displacement_penalty<T, const D: usize>(v: &T, penalty: f64, u: f64) -> TripletsAndDoublets
 where
     T: Variable<D, 0, 1>,
     T::Item: Element<D, 0, 1>,
