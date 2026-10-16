@@ -58,6 +58,19 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
     fn jacobe_mat(&self, _parametric_coordinates: [f64; 0]) -> [[f64; D]; 0] {
         []
     }
+
+    /// A point element contains exactly its node location: returns `Some([])`
+    /// when `x` coincides with the node within [`super::CONTAINS_TOL`].
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 0]> {
+        let tol = super::CONTAINS_TOL;
+        let c = self.nodes.coordinates;
+        let r2: f64 = (0..D).map(|i| (x[i] - c[i]).powi(2)).sum();
+        if r2 <= tol * tol {
+            Some([])
+        } else {
+            None
+        }
+    }
 }
 
 #[cfg(test)]
@@ -74,5 +87,13 @@ mod tests {
         assert_eq!(p.derivative_shape([]), [[0.0, 0.0]]);
         assert_eq!(p.coordinates([]), [1.0, 2.0]);
         assert_eq!(p.jacobe([]), 1.0);
+    }
+
+    #[test]
+    fn poi1_contains() {
+        let p = Poi1::new(Node::new(3, [1.0, 2.0]));
+        assert!(p.contains([1.0, 2.0]));
+        assert!(!p.contains([1.0, 2.1]));
+        assert_eq!(p.local_coordinates([1.0, 2.0]), Some([]));
     }
 }

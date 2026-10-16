@@ -3,6 +3,12 @@ pub mod quad4;
 pub mod seg2;
 pub mod tri3;
 
+/// Tolerance used by the containment / inverse-map checks (`local_coordinates`,
+/// `contains`). It is applied to normalized (parametric / barycentric)
+/// coordinates and, scaled by the element's characteristic size, to physical
+/// residual distances.
+pub(crate) const CONTAINS_TOL: f64 = 1e-10;
+
 pub trait Element<const D: usize, const P: usize, const N: usize> {
     fn id(&self) -> [usize; N];
     fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
@@ -27,6 +33,16 @@ pub trait Element<const D: usize, const P: usize, const N: usize> {
     /// `J[a][i] = ∂xᵢ/∂ξₐ`, i.e. one `D`-dimensional tangent vector per
     /// parametric direction.
     fn jacobe_mat(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; P];
+
+    /// Inverse isoparametric map: returns the parametric coordinates `ξ` of the
+    /// physical point `x` if `x` lies inside this element (up to
+    /// [`CONTAINS_TOL`]), or `None` otherwise.
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; P]>;
+
+    /// Whether the physical point `x` lies inside this element.
+    fn contains(&self, x: [f64; D]) -> bool {
+        self.local_coordinates(x).is_some()
+    }
 }
 
 pub trait IntegrationScheme<const P: usize, const G: usize> {

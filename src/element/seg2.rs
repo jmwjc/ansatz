@@ -74,6 +74,32 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
             0.5 * (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i])
         })]
     }
+
+    /// Projects `x` onto the segment: `ξ = 2s − 1` where `s = (x−a)·(b−a)/|b−a|²`
+    /// is the normalized projection onto the chord. Returns `Some([ξ])` when `ξ`
+    /// lies in `[-1, 1]` and the perpendicular distance to the segment is within
+    /// tolerance (relevant for `D > 1`).
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 1]> {
+        let tol = super::CONTAINS_TOL;
+        let a = self.nodes[0].coordinates;
+        let b = self.nodes[1].coordinates;
+        let d: [f64; D] = std::array::from_fn(|i| b[i] - a[i]);
+        let l2: f64 = (0..D).map(|i| d[i] * d[i]).sum();
+        if l2 <= tol * tol {
+            return None;
+        }
+        let w: [f64; D] = std::array::from_fn(|i| x[i] - a[i]);
+        let s = (0..D).map(|i| w[i] * d[i]).sum::<f64>() / l2;
+        let ξ = 2.0 * s - 1.0;
+        if ξ < -1.0 - tol || ξ > 1.0 + tol {
+            return None;
+        }
+        let perp2: f64 = (0..D).map(|i| (w[i] - s * d[i]).powi(2)).sum();
+        if perp2 > tol * tol * l2 {
+            return None;
+        }
+        Some([ξ])
+    }
 }
 
 #[cfg(test)]
@@ -96,5 +122,20 @@ mod tests {
         assert!(close(g[0][1], -4.0 / 25.0));
         assert!(close(g[1][0], 3.0 / 25.0));
         assert!(close(g[1][1], 4.0 / 25.0));
+    }
+
+    #[test]
+    fn seg2_contains_and_local_coordinates() {
+        // 1D segment [0, 4]: ξ = 0 at the midpoint x = 2.
+        let s = Seg2::new(Node::new(0, [0.0]), Node::new(1, [4.0]));
+        assert!(s.contains([2.0]));
+        assert!(close(s.local_coordinates([2.0]).unwrap()[0], 0.0));
+        assert!(s.contains([0.0]));
+        assert!(!s.contains([5.0]));
+
+        // 2D segment from (0,0) to (3,4): only points on the segment are inside.
+        let s2 = Seg2::new(Node::new(0, [0.0, 0.0]), Node::new(1, [3.0, 4.0]));
+        assert!(s2.contains([1.5, 2.0]));
+        assert!(!s2.contains([1.5, 2.1]));
     }
 }

@@ -114,6 +114,47 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
             std::array::from_fn(|i| self.nodes[2].coordinates[i] - self.nodes[0].coordinates[i]),
         ]
     }
+
+    /// Solves the least-squares projection of `x` onto the triangle plane for
+    /// the barycentric coordinates `(λ₂, λ₃)` (with `λ₁ = 1 − λ₂ − λ₃`, the
+    /// reference triangle being `(0,0)`, `(1,0)`, `(0,1)`). Returns `Some` when
+    /// all three barycentric coordinates are non-negative and the out-of-plane
+    /// residual (for `D = 3`) is within tolerance.
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 2]> {
+        let tol = super::CONTAINS_TOL;
+        let a = self.nodes[0].coordinates;
+        let b = self.nodes[1].coordinates;
+        let c = self.nodes[2].coordinates;
+        let u: [f64; D] = std::array::from_fn(|i| b[i] - a[i]);
+        let v: [f64; D] = std::array::from_fn(|i| c[i] - a[i]);
+        let w: [f64; D] = std::array::from_fn(|i| x[i] - a[i]);
+
+        let uu: f64 = (0..D).map(|i| u[i] * u[i]).sum();
+        let uv: f64 = (0..D).map(|i| u[i] * v[i]).sum();
+        let vv: f64 = (0..D).map(|i| v[i] * v[i]).sum();
+        let wu: f64 = (0..D).map(|i| w[i] * u[i]).sum();
+        let wv: f64 = (0..D).map(|i| w[i] * v[i]).sum();
+        let det = uu * vv - uv * uv;
+        if det.abs() <= 1e-16 * (uu * vv) {
+            return None;
+        }
+
+        let l2 = (wu * vv - wv * uv) / det;
+        let l3 = (uu * wv - uv * wu) / det;
+        let l1 = 1.0 - l2 - l3;
+        if l1 < -tol || l2 < -tol || l3 < -tol {
+            return None;
+        }
+
+        let r2: f64 = (0..D)
+            .map(|i| (w[i] - l2 * u[i] - l3 * v[i]).powi(2))
+            .sum();
+        let scale = uu.max(vv).max(1.0);
+        if r2 > tol * tol * scale {
+            return None;
+        }
+        Some([l2, l3])
+    }
 }
 
 #[cfg(test)]
@@ -145,6 +186,30 @@ mod tests {
         assert!(close(c[1], 4.0 / 3.0));
         // jacobe = |det J| = 2×area = 12
         assert!(close(t.jacobe([0.0, 0.0]), 12.0));
+    }
+
+    #[test]
+    fn tri3_contains_and_local_coordinates() {
+        // Right triangle (0,0), (3,0), (0,4): centroid barycentric = (1/3, 1/3).
+        let t = Tri3::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 0.0]),
+            Node::new(2, [0.0, 4.0]),
+        );
+        assert!(t.contains([1.0, 4.0 / 3.0]));
+        let lc = t.local_coordinates([1.0, 4.0 / 3.0]).unwrap();
+        assert!(close(lc[0], 1.0 / 3.0));
+        assert!(close(lc[1], 1.0 / 3.0));
+        assert!(!t.contains([3.0, 4.0]));
+
+        // Spatial triangle in the xy-plane: off-plane points are rejected.
+        let t3 = Tri3::new(
+            Node::new(0, [0.0, 0.0, 0.0]),
+            Node::new(1, [2.0, 0.0, 0.0]),
+            Node::new(2, [0.0, 3.0, 0.0]),
+        );
+        assert!(t3.contains([1.0, 1.0, 0.0]));
+        assert!(!t3.contains([1.0, 1.0, 0.1]));
     }
 
     #[test]

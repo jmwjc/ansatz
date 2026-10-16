@@ -149,6 +149,57 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
             }),
         ]
     }
+
+    /// Inverse of the bilinear isoparametric map, solved with a Gauss–Newton
+    /// (least-squares) iteration starting from the reference centroid `(0, 0)`.
+    /// Returns `Some([ξ, η])` only when the iteration converges inside the
+    /// reference square `[-1, 1]²` and the physical residual is within
+    /// tolerance (relevant for `D = 3`).
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 2]> {
+        let tol = super::CONTAINS_TOL;
+        let mut ξ = 0.0_f64;
+        let mut η = 0.0_f64;
+        for _ in 0..20 {
+            let j = self.jacobe_mat([ξ, η]);
+            let g00: f64 = (0..D).map(|i| j[0][i] * j[0][i]).sum();
+            let g01: f64 = (0..D).map(|i| j[0][i] * j[1][i]).sum();
+            let g11: f64 = (0..D).map(|i| j[1][i] * j[1][i]).sum();
+            let det = g00 * g11 - g01 * g01;
+            if det.abs() <= 1e-20 {
+                return None;
+            }
+            let f = self.coordinates([ξ, η]);
+            let r: [f64; D] = std::array::from_fn(|i| x[i] - f[i]);
+            let r0: f64 = (0..D).map(|i| j[0][i] * r[i]).sum();
+            let r1: f64 = (0..D).map(|i| j[1][i] * r[i]).sum();
+            let dξ = (g11 * r0 - g01 * r1) / det;
+            let dη = (g00 * r1 - g01 * r0) / det;
+            ξ += dξ;
+            η += dη;
+            if dξ.abs() < 1e-13 && dη.abs() < 1e-13 {
+                break;
+            }
+        }
+
+        if ξ < -1.0 - tol || ξ > 1.0 + tol || η < -1.0 - tol || η > 1.0 + tol {
+            return None;
+        }
+
+        let f = self.coordinates([ξ, η]);
+        let r2: f64 = (0..D).map(|i| (x[i] - f[i]).powi(2)).sum();
+        let vertices = self.vertices_coordinates();
+        let mut scale = 0.0_f64;
+        for k in 0..4 {
+            let d2: f64 = (0..D)
+                .map(|i| (vertices[k][i] - vertices[0][i]).powi(2))
+                .sum();
+            scale = scale.max(d2);
+        }
+        if r2 > tol * tol * scale.max(1.0) {
+            return None;
+        }
+        Some([ξ, η])
+    }
 }
 
 #[cfg(test)]
@@ -214,6 +265,33 @@ mod tests {
         assert!(close(g[2][1], 0.5));
         assert!(close(g[3][0], -0.5));
         assert!(close(g[3][1], 0.5));
+    }
+
+    #[test]
+    fn quad4_contains_and_local_coordinates() {
+        // Unit square mapped to [0,2]×[0,2]: reference centroid (0,0) maps to (1,1).
+        let q = Quad4::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [2.0, 0.0]),
+            Node::new(2, [2.0, 2.0]),
+            Node::new(3, [0.0, 2.0]),
+        );
+        assert!(q.contains([1.0, 1.0]));
+        let lc = q.local_coordinates([1.0, 1.0]).unwrap();
+        assert!(close(lc[0], 0.0));
+        assert!(close(lc[1], 0.0));
+        assert!(q.contains([2.0, 2.0]));
+        assert!(!q.contains([3.0, 1.0]));
+
+        // Distorted (trapezoidal) quadrilateral: reference centroid maps to the
+        // average of the vertices.
+        let q2 = Quad4::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [2.0, 0.0]),
+            Node::new(2, [3.0, 2.0]),
+            Node::new(3, [0.0, 2.0]),
+        );
+        assert!(q2.contains([1.25, 1.0]));
     }
 
     #[test]

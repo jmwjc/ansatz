@@ -25,14 +25,14 @@ use faer::sparse::Triplet;
 /// [`super::bar::stiffness`] only in the material coefficient (`k` replaces
 /// `ea`).
 ///
-/// `v` is a set of elements (implementing [`Variable<D, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, 0, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn conduction_stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     k: f64,
 ) -> Triplets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
@@ -69,14 +69,14 @@ where
 /// length `L` this yields the consistent mass matrix
 /// `(ρ c_p L / 6) [[2, 1], [1, 2]]`.
 ///
-/// `v` is a set of elements (implementing [`Variable<D, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, 0, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn capacity<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     rho_cp: f64,
 ) -> Triplets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
@@ -119,7 +119,7 @@ pub fn heat_source<T, const D: usize, const P: usize, const N: usize, const G: u
     q: impl Fn([f64; D]) -> f64,
 ) -> Doublets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -151,7 +151,7 @@ where
 /// is the sign-flipped analogue of [`super::bar::traction`], generalized to
 /// arbitrary boundary dimension. Returns a list of [`Doublet`]s.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a concentrated flux.
 pub fn heat_flux<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -159,7 +159,7 @@ pub fn heat_flux<T, const D: usize, const P: usize, const N: usize, const G: usi
     qn: f64,
 ) -> Doublets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -191,7 +191,7 @@ where
 /// quadrature point). Returns a `(stiffness triplets, [`Doublet`] load terms)`
 /// pair.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a single-node constraint.
 pub fn temperature_penalty<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -200,7 +200,7 @@ pub fn temperature_penalty<T, const D: usize, const P: usize, const N: usize, co
     td: impl Fn([f64; D]) -> f64,
 ) -> TripletsAndDoublets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -244,7 +244,7 @@ where
 /// (Dirichlet) constraint whereas convection models a physical (natural-type)
 /// boundary flux.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a single-node term.
 pub fn convection<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -253,7 +253,7 @@ pub fn convection<T, const D: usize, const P: usize, const N: usize, const G: us
     t_inf: f64,
 ) -> TripletsAndDoublets
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -294,7 +294,7 @@ pub fn l2_error<T, const D: usize, const P: usize, const N: usize, const G: usiz
     u: impl Fn([f64; D]) -> f64,
 ) -> f64
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -328,7 +328,7 @@ pub fn h1_semierror<T, const D: usize, const P: usize, const N: usize, const G: 
     grad_u: impl Fn([f64; D]) -> [f64; D],
 ) -> f64
 where
-    T: Variable<D, P, N>,
+    T: Variable<D, 0, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
