@@ -27,3 +27,4 @@
 - [1D 桁架杆（bar1d）](./usage-example.md)
 - [悬臂梁的力学模型（平面应力）](./example-cantilever-model.md)
 - [悬臂梁算例（cantilever）](./usage-example-cantilever.md)
+- [Cook 膜（平面应变）](./example-cook.md)
