@@ -19,8 +19,11 @@
 - [单元刚度与全局组装](./theory-assembly.md)
 - [边界条件与罚函数法](./theory-bc.md)
 - [热传导方程（Heat Equation）](./theory-heat.md)
+- [线弹性力学（Linear Elasticity）](./theory-elasticity.md)
 
 # 第三部分：算例
 
 - [拉压杆的力学模型](./example-bar1d-model.md)
 - [1D 桁架杆（bar1d）](./usage-example.md)
+- [悬臂梁的力学模型（平面应力）](./example-cantilever-model.md)
+- [悬臂梁算例（cantilever）](./usage-example-cantilever.md)
