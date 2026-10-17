@@ -1,4 +1,5 @@
 pub mod bar;
+pub mod elasticity;
 pub mod heat;
 
 use std::collections::BTreeSet;
