@@ -2,9 +2,16 @@
 name = "ansatz"
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85.0"
 description = "Discretization-agnostic approximation and assembly layer for mechanics problems: you supply the ansatz, a sparse solver does the rest."
 keywords = ["fem", "meshfree", "discretization", "tensor", "assembly"]
 categories = ["science", "mathematics", "simulation"]
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/jmwjc/ansatz"
+documentation = "https://docs.rs/ansatz"
+# Development-only material is kept out of the published package.
+exclude = ["book/", "dhat-heap.json", "PLAN.md", "AGENTS.md"]
 
 [dependencies]
 faer = "0.24.4"

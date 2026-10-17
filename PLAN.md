@@ -195,14 +195,14 @@ Refs: #12
 
 ### 7.3 元数据检查（`Cargo.toml`）
 
-- [ ] `name = "ansatz"`（已在 crates.io 确认未被占用）、`version = "0.1.0"`、`edition = "2024"`；
-- [ ] `description`：一句英文、不含“in Rust”、点明“离散近似/组装层”；
-- [ ] `keywords`：最多 5 个且为小写（当前 `fem`/`meshfree`/`discretization`/`tensor`/`assembly`）；
-- [ ] `categories`：`science`、`mathematics`、`simulation`（需与 crates.io 合法分类一致）；
-- [ ] `license = "MIT"` 且仓库内存在 `LICENSE`；
-- [ ] `readme = "README.md"`、`repository`、`documentation`（docs.rs 链接）、`homepage`（可选）；
-- [ ] `rust-version`（MSRV）：edition 2024 要求 Rust 1.85+，写入并由 CI 的一个 job 验证；
-- [ ] `exclude`：排除 `target/`、`dhat-heap.json`、`book/` 构建产物与大体积示例输出，避免包体积膨胀；
+- [x] `name = "ansatz"`（已在 crates.io 确认未被占用）、`version = "0.1.0"`、`edition = "2024"`；
+- [x] `description`：一句英文、不含“in Rust”、点明“离散近似/组装层”；
+- [x] `keywords`：最多 5 个且为小写（当前 `fem`/`meshfree`/`discretization`/`tensor`/`assembly`）；
+- [x] `categories`：`science`、`mathematics`、`simulation`（需与 crates.io 合法分类一致）；
+- [x] `license = "MIT"` 且仓库内存在 `LICENSE`；
+- [x] `readme = "README.md"`、`repository`、`documentation`（docs.rs 链接）、`homepage`（可选）；
+- [x] `rust-version = "1.85.0"`（MSRV）：edition 2024 的下限；已用 `cargo +1.85.0 check --all-targets` 与 `cargo +1.85.0 test` 验证，仍需在 CI 中加一个固定 1.85 job 守住；
+- [x] `exclude`：已排除 `book/`、`dhat-heap.json`、`PLAN.md`、`AGENTS.md`（`cargo package --list` 现为 40 个文件）；`target/` 由 cargo 自动排除；
 - [ ] `[features]` 中 `sparse`/`std` 若仍为占位开关，在 rustdoc 中注明，或直接移除；
 - [ ] `[profile.release] debug = 1` 保留（用于 `dhat` 剖析），并在 README 中说明。
 
