@@ -93,6 +93,37 @@ pub struct GmshMesh<const D: usize> {
 }
 
 impl<const D: usize> GmshMesh<D> {
+    /// Resolves a physical name to its physical tag.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the physical name is not found.
+    fn physical_tag(&self, physical_name: &str) -> i32 {
+        self.physical_names
+            .iter()
+            .find(|(_, name)| name.as_str() == physical_name)
+            .map(|(tag, _)| *tag)
+            .unwrap_or_else(|| panic!("physical name not found: {physical_name}"))
+    }
+
+    /// Returns the GMSH element type number stored in a physical group.
+    ///
+    /// This lets callers choose a concrete element type (e.g. `Tri3` vs
+    /// `Quad4`) at run time without attempting a typed [`GmshMesh::elements`]
+    /// call first.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the physical name is not found, or if that physical group has
+    /// no element block.
+    pub fn element_type(&self, physical_name: &str) -> i32 {
+        let tag = self.physical_tag(physical_name);
+        self.blocks
+            .get(&tag)
+            .map(|block| block.elem_type)
+            .unwrap_or_else(|| panic!("physical group {tag} has no elements"))
+    }
+
     /// Builds the typed element vector for a physical name.
     ///
     /// # Panics
@@ -100,13 +131,7 @@ impl<const D: usize> GmshMesh<D> {
     /// Panics if the physical name is not found, or if the element type of that
     /// physical group does not match `T`.
     pub fn elements<T: FromGmsh<D>>(&self, physical_name: &str) -> Vec<T> {
-        let tag = self
-            .physical_names
-            .iter()
-            .find(|(_, name)| name.as_str() == physical_name)
-            .map(|(tag, _)| *tag)
-            .unwrap_or_else(|| panic!("physical name not found: {physical_name}"));
-        self.elements_by_tag::<T>(tag)
+        self.elements_by_tag::<T>(self.physical_tag(physical_name))
     }
 
     /// Builds the typed element vector for a physical tag.
@@ -539,6 +564,13 @@ mod tests {
         assert_eq!(segs.len(), 40, "expected 40 segment elements");
         let tris: Vec<Tri3<2>> = mesh.elements("Ω");
         assert_eq!(tris.len(), 288, "expected 288 triangle elements");
+    }
+
+    #[test]
+    fn element_type_reports_group_element_type() {
+        let mesh = read_gmsh::<2>("examples/msh/patchtest_tri3.msh");
+        assert_eq!(mesh.element_type("Ω"), Tri3::<2>::GMSH_ELEMENT_TYPE);
+        assert_eq!(mesh.element_type("Γᵍ"), Seg2::<2>::GMSH_ELEMENT_TYPE);
     }
 
     #[test]
