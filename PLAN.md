@@ -88,8 +88,8 @@
 - [ ] 重写 `README.md`（简介、安装、快速开始、API 概览、示例链接）；
 - [ ] 补齐所有公共 API 的 rustdoc（中文）；
 - [ ] 编写 `docs/element.md`、`docs/assembly.md`、`docs/solver.md` 设计文档；
-- [ ] 维护 `CHANGELOG.md`（基于 Conventional Commits 历史）；
-- [ ] 升级到 `0.2.0` 并执行 `cargo publish --dry-run` 验证。
+- [x] 维护 `CHANGELOG.md`（基于 Conventional Commits 历史，已建立 0.2.0 条目）；
+- [x] 升级到 `0.2.0` 并执行 `cargo publish --dry-run` 验证（已于 0.2.0 打 tag 时完成）。
 
 ## 5. Git Commit 规范化
 
@@ -166,9 +166,9 @@ Refs: #12
 - **性能可测**：关键路径使用 `dhat` 或自定义 benchmark 验证；
 - **命名稳定**：既有命名（如 `jacobe`、`Doublet`）是有意保留的 API 一部分，不随个人喜好"修正"。
 
-## 7. 首次正式发布（v0.1.0）前的安排
+## 7. 首次正式发布（v0.2.0）前的安排
 
-> 本节是 M6「文档与发布」的细化与执行清单。0.1.0 的目标是：**把当前已验证的 API 面（`element` / `operation` / `io` + `bar` / `heat` / `elasticity`）冻结成一个可用、可安装、可引用的版本**，而不在发布前引入新特性。
+> 本节是 M6「文档与发布」的细化与执行清单。0.2.0 的目标是：**把当前已验证的 API 面（`element` / `operation` / `io` + `bar` / `heat` / `elasticity`）冻结成一个可用、可安装、可引用的版本**，而不在发布前引入新特性。
 
 ### 7.1 发布门槛（全部满足才允许 `cargo publish`）
 
@@ -178,7 +178,7 @@ Refs: #12
 - [ ] `cargo doc --no-deps` 无警告，公共 API rustdoc 全覆盖；
 - [ ] CI（GitHub Actions：fmt + clippy + test + doc）在 `main` 上全绿，且开启分支保护；
 - [ ] 5 个示例（`bar1d`/`patchtest2d`/`cantilever`/`cook`/`elasticity_cli`）全部可运行，README 中的命令逐条实跑验证；
-- [ ] `CHANGELOG.md` 覆盖本次发布的全部变更；
+- [x] `CHANGELOG.md` 覆盖本次发布的全部变更；
 - [ ] 未稳定的 API 已标注（`#[doc(hidden)]` 或移入 `unstable` 模块），公开面经过一次逐项审查；
 - [ ] `cargo package --list` 与 `cargo publish --dry-run` 通过，且打包内容仅含预期文件。
 
@@ -186,16 +186,16 @@ Refs: #12
 
 | 时间 | 工作重点 |
 |------|----------|
-| **T−4 周** | 功能冻结：只接受 bugfix 与文档；开始整理 `CHANGELOG.md`；确定 0.1.0 的公开 API 清单 |
+| **T−4 周** | 功能冻结：只接受 bugfix 与文档；开始整理 `CHANGELOG.md`；确定 0.2.0 的公开 API 清单 |
 | **T−3 周** | API 审查：命名一致性（`jacobe` 等既定拼写保持不变）、泛型参数顺序（`<T, D, P, N, G>`）、错误处理（`unwrap` 是否应在库内出现）、用 `cargo public-api` 导出基线快照 |
 | **T−2 周** | 文档周：README/`book/` 补齐并校对所有代码片段；`rustdoc` 示例与文档测试能编译；检查 `book/` 中所有路径真实存在 |
 | **T−1 周** | 发布演练：在干净目录做 `cargo package` + 试装（`cargo new` 后以 path 依赖引入）；`--dry-run` 修元数据；确认 MSRV |
 | **T 日** | 打 tag → `cargo publish` → 验证 docs.rs 构建 → 发 announcement |
-| **T+1 周** | 收集反馈，补 issue 模板/讨论区；如需修缺陷则发 0.1.1（不撤回已发布版本） |
+| **T+1 周** | 收集反馈，补 issue 模板/讨论区；如需修缺陷则发 0.2.1（不撤回已发布版本） |
 
 ### 7.3 元数据检查（`Cargo.toml`）
 
-- [x] `name = "ansatz"`（已在 crates.io 确认未被占用）、`version = "0.1.0"`、`edition = "2024"`；
+- [x] `name = "ansatz"`（已在 crates.io 确认未被占用）、`version = "0.2.0"`、`edition = "2024"`；
 - [x] `description`：一句英文、不含“in Rust”、点明“离散近似/组装层”；
 - [x] `keywords`：最多 5 个且为小写（当前 `fem`/`meshfree`/`discretization`/`tensor`/`assembly`）；
 - [x] `categories`：`science`、`mathematics`、`simulation`（需与 crates.io 合法分类一致）；
@@ -232,20 +232,20 @@ cargo package --list
 cargo publish --dry-run
 
 # 4) 打 tag 并发布
-git tag -a v0.1.0 -m "ansatz v0.1.0"
-git push origin v0.1.0
+git tag -a v0.2.0 -m "ansatz v0.2.0"
+git push origin v0.2.0
 cargo publish
 
 # 5) 发布后验证：docs.rs 构建成功；在新目录试装
 cargo new /tmp/ansatz-smoke && cd /tmp/ansatz-smoke && cargo add ansatz
 ```
 
-- **撤回**：仅在严重缺陷时 `cargo yank --version 0.1.0`；yank 不删除代码，必须同时发布修复版本；
+- **撤回**：仅在严重缺陷时 `cargo yank --version 0.2.0`；yank 不删除代码，必须同时发布修复版本；
 - **发布后 24 小时内**：检查 docs.rs 构建结果、README 渲染、`cargo add` 是否可拉取、示例能否编译。
 
 ### 7.6 发布后收尾
 
-- [ ] GitHub Release 基于 `v0.1.0` tag，正文摘录 `CHANGELOG.md`；
+- [ ] GitHub Release 基于 `v0.2.0` tag，正文摘录 `CHANGELOG.md`；
 - [ ] 把 README 中的「尚未发布到 crates.io」提示升级为「安装」；
 - [ ] 同步更新 `book/src/quickstart.md` 的安装方式（git 依赖 → `cargo add ansatz`）；
 - [ ] 添加 issue 模板（bug / feature）与 `CONTRIBUTING.md`（可选）；

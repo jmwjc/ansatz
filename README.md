@@ -102,7 +102,7 @@ let u = k.sp_cholesky(Side::Lower).unwrap().solve(&f);
 
 ## 当前状态
 
-早期原型（0.1.0）。已可端到端运行：
+早期原型（0.2.0）。已可端到端运行：
 
 - 单元：`Seg2<D>`、`Tri3<D>`、`Quad4<D>`、`Poi1<D>`；
 - 积分：1D Gauss–Legendre，2D Dunavant / 张量积，3D Keast / 张量积；
@@ -127,6 +127,7 @@ mdbook serve book      # 或：mdbook build book
 ```
 
 - `book/` —— 用户手册、理论推导与算例讲解（中文）；
+- `CHANGELOG.md` —— 版本变更记录（Keep a Changelog 格式）；
 - `PLAN.md` —— 开发计划、里程碑与发布前安排；
 - `AGENTS.md` —— 面向 AI 编码代理的架构与约定说明。
 

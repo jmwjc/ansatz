@@ -8,7 +8,7 @@
 
 ### 技术栈与关键配置（`Cargo.toml`）
 
-- 语言/工具链：Rust，**edition 2024**，crate 名 `ansatz`，版本 0.1.0。
+- 语言/工具链：Rust，**edition 2024**，crate 名 `ansatz`，版本 0.2.0。
 - 核心依赖：
   - `faer = "0.24.4"` — 稠密/稀疏线性代数（`SparseColMat`、`Triplet`、`Col`、稀疏 Cholesky/LU）。版本升级需谨慎，PLAN.md 明确要求单独提交。
   - `dhat = "0.3.3"`（可选）— 堆分配性能剖析。
@@ -102,4 +102,4 @@ cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 
 - M2：`Problem` trait、`Truss1D`、求解器封装尚未建立（按定位，求解器应保持为可选外部后端）。
 - M3/M4：`Tri3`/`Quad4`/`Seg2` 已实现，`heat` 与 `elasticity`（平面应力/应变/3D）算子及 2D 算例已可用；`Material` trait 尚未抽象。
 - M5：`parallel` feature 已声明但未使用；无基准测试。
-- M6：`book/` 手册与 README 已建立，`CHANGELOG.md` 不存在。
+- M6：`book/` 手册与 README 已建立，`CHANGELOG.md` 已建立（0.2.0）。
