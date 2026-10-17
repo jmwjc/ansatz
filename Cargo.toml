@@ -1,7 +1,10 @@
 [package]
-name = "rustfem"
+name = "ansatz"
 version = "0.1.0"
 edition = "2024"
+description = "Discretization-agnostic approximation and assembly layer for mechanics problems: you supply the ansatz, a sparse solver does the rest."
+keywords = ["fem", "meshfree", "discretization", "tensor", "assembly"]
+categories = ["science", "mathematics", "simulation"]
 
 [dependencies]
 faer = "0.24.4"

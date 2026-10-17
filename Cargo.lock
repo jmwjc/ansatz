@@ -36,7 +36,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rustfem"
+name = "ansatz"
 version = "0.1.0"
 dependencies = [
  "dhat",

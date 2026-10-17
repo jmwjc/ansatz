@@ -10,11 +10,11 @@ use faer::Side;
 use faer::prelude::*;
 use faer::sparse::SparseColMat;
 
-use rustfem::element::poi1::Poi1;
-use rustfem::element::seg2::Seg2;
-use rustfem::node::Node;
-use rustfem::operation::bar::{body_force, displacement_penalty, stiffness, traction};
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::element::poi1::Poi1;
+use ansatz::element::seg2::Seg2;
+use ansatz::node::Node;
+use ansatz::operation::bar::{body_force, displacement_penalty, stiffness, traction};
+use ansatz::sparse_vector::try_new_from_doublet;
 use std::time::Instant;
 
 fn main() {

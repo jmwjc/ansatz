@@ -1,6 +1,6 @@
 [book]
-title = "rustfem 文档"
-authors = ["rustfem contributors"]
+title = "ansatz 文档"
+authors = ["ansatz contributors"]
 language = "zh"
 src = "src"
 

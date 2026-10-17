@@ -13,13 +13,13 @@ use faer::prelude::*;
 use faer::sparse::SparseColMat;
 use faer::Side;
 
-use rustfem::element::quad4::Quad4;
-use rustfem::element::seg2::Seg2;
-use rustfem::element::tri3::Tri3;
-use rustfem::element::{Element, FullIntegration};
-use rustfem::io::gmsh::{read_gmsh, FromGmsh};
-use rustfem::operation::heat::{conduction_stiffness, h1_semierror, l2_error, temperature_penalty};
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::element::quad4::Quad4;
+use ansatz::element::seg2::Seg2;
+use ansatz::element::tri3::Tri3;
+use ansatz::element::{Element, FullIntegration};
+use ansatz::io::gmsh::{read_gmsh, FromGmsh};
+use ansatz::operation::heat::{conduction_stiffness, h1_semierror, l2_error, temperature_penalty};
+use ansatz::sparse_vector::try_new_from_doublet;
 
 /// Runs a steady-state patch test on a mesh read from GMSH: assembles the
 /// conduction stiffness, imposes the prescribed boundary temperature (linear

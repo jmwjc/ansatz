@@ -11,7 +11,7 @@
 // solution and `book/src/usage-example-cantilever.md` for a walkthrough.
 //
 // The finite-element solution is compared against the exact solution through
-// the L² and energy-norm error operators in `rustfem::operation::elasticity`,
+// the L² and energy-norm error operators in `ansatz::operation::elasticity`,
 // and a deformed-shape von Mises stress cloud is rendered with `plotters` to
 // `target/cantilever_stress.png` (a second CLI argument overrides the path).
 
@@ -21,15 +21,15 @@ use faer::sparse::SparseColMat;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
-use rustfem::element::Element;
-use rustfem::element::quad4::Quad4;
-use rustfem::element::seg2::Seg2;
-use rustfem::io::gmsh::read_gmsh;
-use rustfem::operation::elasticity::{
+use ansatz::element::Element;
+use ansatz::element::quad4::Quad4;
+use ansatz::element::seg2::Seg2;
+use ansatz::io::gmsh::read_gmsh;
+use ansatz::operation::elasticity::{
     displacement_penalty, energy_error, lame_constants, l2_error, plane_stress_lambda, stiffness,
     traction,
 };
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::sparse_vector::try_new_from_doublet;
 
 // Geometry (width b = 1).
 const L: f64 = 8.0; // beam length

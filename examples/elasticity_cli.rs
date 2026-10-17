@@ -32,15 +32,15 @@ use faer::Side;
 use faer::prelude::*;
 use faer::sparse::SparseColMat;
 
-use rustfem::element::quad4::Quad4;
-use rustfem::element::seg2::Seg2;
-use rustfem::element::tri3::Tri3;
-use rustfem::element::{Element, FullIntegration};
-use rustfem::io::gmsh::{FromGmsh, GmshMesh, read_gmsh};
-use rustfem::operation::elasticity::{
+use ansatz::element::quad4::Quad4;
+use ansatz::element::seg2::Seg2;
+use ansatz::element::tri3::Tri3;
+use ansatz::element::{Element, FullIntegration};
+use ansatz::io::gmsh::{FromGmsh, GmshMesh, read_gmsh};
+use ansatz::operation::elasticity::{
     body_force, displacement_penalty, lame_constants, plane_stress_lambda, stiffness, traction,
 };
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::sparse_vector::try_new_from_doublet;
 
 // Physical-region naming convention for this CLI. These are intentionally
 // local to the example: different problem drivers (e.g. a future `heat_cli.rs`)

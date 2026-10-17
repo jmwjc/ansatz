@@ -21,14 +21,14 @@ use faer::prelude::*;
 use faer::sparse::SparseColMat;
 use plotters::prelude::*;
 
-use rustfem::element::quad4::Quad4;
-use rustfem::element::seg2::Seg2;
-use rustfem::io::gmsh::read_gmsh;
-use rustfem::operation::elasticity::{
+use ansatz::element::quad4::Quad4;
+use ansatz::element::seg2::Seg2;
+use ansatz::io::gmsh::read_gmsh;
+use ansatz::operation::elasticity::{
     bulk_modulus, deviatoric_stiffness, dilatational_stiffness, displacement_penalty,
     lame_constants, stiffness, traction,
 };
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::sparse_vector::try_new_from_doublet;
 
 const E: f64 = 1.0;
 const TOTAL_LOAD: f64 = 1.0;
