@@ -13,7 +13,7 @@
 //! assembling explicit Voigt `B`/`D` matrices. See
 //! `book/src/theory-elasticity.md` for the underlying theory.
 
-use crate::element::{Element, FullIntegration, IntegrationScheme};
+use crate::element::{Element, FullIntegration, IntegrationScheme, ReducedIntegration};
 use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
@@ -39,34 +39,16 @@ pub fn plane_stress_lambda(e: f64, nu: f64) -> f64 {
     e * nu / (1.0 - nu * nu)
 }
 
-/// Isotropic linear-elastic stiffness kernel (integrand density): the
-/// bilinear-form value `a(Nᵢ eₐ, Nⱼ e_b)` per unit measure, before the `|J| w_g`
-/// quadrature weight is applied.
+/// Bulk modulus in `D` spatial dimensions: `K = λ + 2μ/D`.
 ///
-/// In index (summation) form,
+/// For `D = 3` this is the standard `K = λ + 2μ/3`; for 2D plane strain it is
+/// `K = λ + μ`. It is the coefficient of the **dilatational** part of the
+/// isotropic bilinear form (see [`dilatational_stiffness`]); together with the
+/// shear modulus `μ` it gives the volumetric/deviatoric split
+/// `C = K I⊗I + 2μ (I − I⊗I/D)`.
 ///
-/// `λ (∂ₐNᵢ)(∂_b Nⱼ) + μ ( δ_ab (∂ₖNᵢ)(∂ₖNⱼ) + (∂_b Nᵢ)(∂ₐNⱼ) )`
-///
-/// where `∂ₖNᵢ = dshape[i][k]` is the physical gradient returned by
-/// [`Element::derivative_shape`], `i, j` are nodes, `a, b` are displacement
-/// components, and `k` is summed over the `D` spatial directions. This is the
-/// isotropic form `ε(u):C:ε(v) = λ(∇·u)(∇·v) + μ(∇u:∇v + ∇u:∇vᵀ)` evaluated
-/// on the single-component test functions `u = Nᵢ eₐ`, `v = Nⱼ e_b`.
-fn isotropic_kernel<const D: usize, const N: usize>(
-    dshape: [[f64; D]; N],
-    lambda: f64,
-    mu: f64,
-    i: usize,
-    j: usize,
-    a: usize,
-    b: usize,
-) -> f64 {
-    let grad_dot = (0..D)
-        .map(|k| dshape[i][k] * dshape[j][k])
-        .sum::<f64>();
-    let delta = if a == b { 1.0 } else { 0.0 };
-    lambda * dshape[i][a] * dshape[j][b]
-        + mu * (delta * grad_dot + dshape[i][b] * dshape[j][a])
+pub fn bulk_modulus<const D: usize>(lambda: f64, mu: f64) -> f64 {
+    lambda + 2.0 * mu / D as f64
 }
 
 /// Assembles the linear-elastic stiffness matrix and returns sparse triplets for
@@ -84,6 +66,13 @@ fn isotropic_kernel<const D: usize, const N: usize>(
 /// components, and holds for any spatial dimension `D` (2D plane strain, full
 /// 3D, and shell-like elements embedded in 3D). For plane stress, substitute
 /// [`plane_stress_lambda`] for `lambda`; `mu` is unchanged.
+///
+/// This operator equals the sum of its volumetric and deviatoric parts,
+/// `stiffness(v, λ, μ) == dilatational_stiffness(v, K) + deviatoric_stiffness(v, μ)`
+/// with `K =` [`bulk_modulus::<D>`](bulk_modulus).
+///
+/// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
+/// (`b ≤ a`), while off-diagonal blocks `(i, j)`, `j < i`, are emitted in full.
 ///
 /// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`].
@@ -107,20 +96,107 @@ where
             let wg = w[g];
             let dshape = elm.derivative_shape(ξg);
             let jacobe = elm.jacobe(ξg);
-            // Node-block assembly, with the diagonal node blocks (i, i)
-            // handled in a separate loop: each diagonal block emits the lower
-            // triangle of its D×D block (b ≤ a, so row ≥ col holds), while each
-            // off-diagonal block (i, j), j < i, is emitted in full.
+            for i in 0..N {
+                // Diagonal node block (i, i): lower triangle (b ≤ a).
+                let grad_dot = (0..D).map(|k| dshape[i][k] * dshape[i][k]).sum::<f64>();
+                for a in 0..D {
+                    for b in 0..=a {
+                        let delta = if a == b { 1.0 } else { 0.0 };
+                        let value = lambda * dshape[i][a] * dshape[i][b]
+                            + mu * (delta * grad_dot + dshape[i][b] * dshape[i][a]);
+                        triplets.push(Triplet::new(
+                            id[i] * D + a,
+                            id[i] * D + b,
+                            value * jacobe * wg,
+                        ));
+                    }
+                }
+                // Off-diagonal node blocks (i, j), j < i: full D×D block.
+                for j in 0..i {
+                    let grad_dot = (0..D).map(|k| dshape[i][k] * dshape[j][k]).sum::<f64>();
+                    for a in 0..D {
+                        for b in 0..D {
+                            let delta = if a == b { 1.0 } else { 0.0 };
+                            let value = lambda * dshape[i][a] * dshape[j][b]
+                                + mu * (delta * grad_dot + dshape[i][b] * dshape[j][a]);
+                            let g_a = id[i] * D + a;
+                            let g_b = id[j] * D + b;
+                            triplets.push(Triplet::new(
+                                g_a.max(g_b),
+                                g_a.min(g_b),
+                                value * jacobe * wg,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    triplets
+}
+
+/// Assembles the **dilatational (volumetric) stiffness** matrix and returns
+/// sparse triplets for the lower triangle (including the diagonal).
+///
+/// The isotropic bilinear form splits additively into a volumetric and a
+/// deviatoric part, `a(u, v) = a_dil(u, v) + a_dev(u, v)`, where
+///
+/// `a_dil(u, v) = ∫ K (∇·u)(∇·v) dΩ`
+///
+/// is the dilatational part, with `K = λ + 2μ/D` the bulk modulus
+/// (see [`bulk_modulus`]). In components, with `u = Nᵢ eₐ` and `v = Nⱼ e_b`,
+///
+/// `K_{(i,a),(j,b)} = ∫ K (∂ₐNᵢ)(∂_b Nⱼ) dΩ`,
+///
+/// so this operator only involves the divergence of the shape functions.
+///
+/// Unlike [`stiffness`] and [`deviatoric_stiffness`], which use full
+/// integration, this operator deliberately uses **reduced integration**
+/// ([`ReducedIntegration<P, G>`]): selective reduced integration of the
+/// volumetric term is the standard remedy for **volumetric locking** in the
+/// nearly incompressible limit (`ν → 1/2`, `K → ∞`).
+///
+/// For elements with a constant gradient (e.g. the three-node triangle) one
+/// reduced point already integrates the dilatational term exactly, so
+/// `stiffness(v, λ, μ) == dilatational_stiffness(v, K) + deviatoric_stiffness(v, μ)`
+/// still holds; for bilinear quadrilaterals the reduced rule differs from full
+/// integration by design.
+///
+/// `bulk` is the bulk modulus `K`. `v` is a set of elements (implementing
+/// [`Variable<D, 1, P, N>`]); each element must implement
+/// [`ReducedIntegration<P, G>`].
+///
+/// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
+/// (`b ≤ a`), while off-diagonal blocks `(i, j)`, `j < i`, are emitted in full.
+pub fn dilatational_stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
+    v: &T,
+    bulk: f64,
+) -> Triplets
+where
+    T: Variable<D, 1, P, N>,
+    T::Item: Element<D, P, N> + ReducedIntegration<P, G>,
+{
+    let nd = D * N; // DOFs per element (node-major: dof = a·D + p)
+    let mut triplets: Triplets = Vec::with_capacity(nd * (nd + 1) / 2 * G);
+    let ξ = T::Item::points();
+    let w = T::Item::weights();
+    for elm in v.iter() {
+        let id = elm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let dshape = elm.derivative_shape(ξg);
+            let jacobe = elm.jacobe(ξg);
             for i in 0..N {
                 // Diagonal node block (i, i): lower triangle (b ≤ a).
                 for a in 0..D {
                     for b in 0..=a {
-                        let g_a = id[i] * D + a;
-                        let g_b = id[i] * D + b;
+                        // K_{(i,a),(i,b)} += K (∂ₐNᵢ)(∂_b Nᵢ) |J| w.
+                        let value = bulk * dshape[i][a] * dshape[i][b];
                         triplets.push(Triplet::new(
-                            g_a,
-                            g_b,
-                            isotropic_kernel(dshape, lambda, mu, i, i, a, b) * jacobe * wg,
+                            id[i] * D + a,
+                            id[i] * D + b,
+                            value * jacobe * wg,
                         ));
                     }
                 }
@@ -128,12 +204,94 @@ where
                 for j in 0..i {
                     for a in 0..D {
                         for b in 0..D {
+                            // K_{(i,a),(j,b)} += K (∂ₐNᵢ)(∂_b Nⱼ) |J| w.
+                            let value = bulk * dshape[i][a] * dshape[j][b];
                             let g_a = id[i] * D + a;
                             let g_b = id[j] * D + b;
                             triplets.push(Triplet::new(
                                 g_a.max(g_b),
                                 g_a.min(g_b),
-                                isotropic_kernel(dshape, lambda, mu, i, j, a, b) * jacobe * wg,
+                                value * jacobe * wg,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    triplets
+}
+
+/// Assembles the **deviatoric stiffness** matrix and returns sparse triplets for
+/// the lower triangle (including the diagonal).
+///
+/// This is the second part of the volumetric/deviatoric split,
+/// `a_dev(u, v) = ∫ 2μ ε'(u) : ε'(v) dΩ`, where
+/// `ε' = ε − (1/D)(tr ε) I` is the deviatoric strain and `μ` the shear
+/// modulus. In components, with `u = Nᵢ eₐ` and `v = Nⱼ e_b` (summation over
+/// `k`),
+///
+/// `K_{(i,a),(j,b)} = ∫ { μ [ δ_ab (∂ₖNᵢ)(∂ₖNⱼ) + (∂_b Nᵢ)(∂ₐNⱼ) ]
+///                        − (2μ/D) (∂ₐNᵢ)(∂_b Nⱼ) } dΩ`.
+///
+/// It is invariant to the volumetric (dilatational) part of the displacement
+/// and, together with [`dilatational_stiffness`], reproduces [`stiffness`]:
+/// `stiffness(v, λ, μ) == dilatational_stiffness(v, K) + deviatoric_stiffness(v, μ)`.
+///
+/// `mu` is the shear modulus. `v` is a set of elements (implementing
+/// [`Variable<D, 1, P, N>`]); each element must implement
+/// [`FullIntegration<P, G>`].
+///
+/// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
+/// (`b ≤ a`), while off-diagonal blocks `(i, j)`, `j < i`, are emitted in full.
+pub fn deviatoric_stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
+    v: &T,
+    mu: f64,
+) -> Triplets
+where
+    T: Variable<D, 1, P, N>,
+    T::Item: Element<D, P, N> + FullIntegration<P, G>,
+{
+    let nd = D * N; // DOFs per element (node-major: dof = a·D + p)
+    let mut triplets: Triplets = Vec::with_capacity(nd * (nd + 1) / 2 * G);
+    let ξ = T::Item::points();
+    let w = T::Item::weights();
+    for elm in v.iter() {
+        let id = elm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let dshape = elm.derivative_shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            for i in 0..N {
+                // Diagonal node block (i, i): lower triangle (b ≤ a).
+                let grad_dot = (0..D).map(|k| dshape[i][k] * dshape[i][k]).sum::<f64>();
+                for a in 0..D {
+                    for b in 0..=a {
+                        let delta = if a == b { 1.0 } else { 0.0 };
+                        let value = mu * (delta * grad_dot + dshape[i][b] * dshape[i][a])
+                            - (2.0 * mu / D as f64) * dshape[i][a] * dshape[i][b];
+                        triplets.push(Triplet::new(
+                            id[i] * D + a,
+                            id[i] * D + b,
+                            value * jacobe * wg,
+                        ));
+                    }
+                }
+                // Off-diagonal node blocks (i, j), j < i: full D×D block.
+                for j in 0..i {
+                    let grad_dot = (0..D).map(|k| dshape[i][k] * dshape[j][k]).sum::<f64>();
+                    for a in 0..D {
+                        for b in 0..D {
+                            let delta = if a == b { 1.0 } else { 0.0 };
+                            let value = mu * (delta * grad_dot + dshape[i][b] * dshape[j][a])
+                                - (2.0 * mu / D as f64) * dshape[i][a] * dshape[j][b];
+                            let g_a = id[i] * D + a;
+                            let g_b = id[j] * D + b;
+                            triplets.push(Triplet::new(
+                                g_a.max(g_b),
+                                g_a.min(g_b),
+                                value * jacobe * wg,
                             ));
                         }
                     }
@@ -380,8 +538,7 @@ where
             let dshape = elm.derivative_shape(ξg);
             let jacobe = elm.jacobe(ξg);
             // Nodal displacement values of this element.
-            let un: [[f64; D]; N] =
-                std::array::from_fn(|a| std::array::from_fn(|i| u_h(id[a], i)));
+            let un: [[f64; D]; N] = std::array::from_fn(|a| std::array::from_fn(|i| u_h(id[a], i)));
             // Finite-element strain ε_h = sym ∇u_h (components over D×D).
             let eh: [[f64; D]; D] = std::array::from_fn(|i| {
                 std::array::from_fn(|j| {
@@ -411,6 +568,7 @@ where
 mod tests {
     use super::*;
     use crate::element::poi1::Poi1;
+    use crate::element::quad4::Quad4;
     use crate::element::seg2::Seg2;
     use crate::element::tri3::Tri3;
     use crate::node::Node;
@@ -446,14 +604,147 @@ mod tests {
     }
 
     #[test]
-    fn isotropic_kernel_matches_reference() {
-        // For λ = μ = 1 and the Tri3 gradient ∇N₁ = (-1, -1):
-        //   ∂ₖN₁∂ₖN₁ = 2, so the (0,0) diagonal entry is
-        //   λ·(-1)(-1) + μ(1·2 + (-1)(-1)) = 1 + 3 = 4,
-        // and the (0,1) entry is λ·(-1)(-1) + μ(0·2 + (-1)(-1)) = 1 + 1 = 2.
-        let dshape = [[-1.0_f64, -1.0]; 1];
-        assert!(close(isotropic_kernel(dshape, 1.0, 1.0, 0, 0, 0, 0), 4.0));
-        assert!(close(isotropic_kernel(dshape, 1.0, 1.0, 0, 0, 0, 1), 2.0));
+    fn stiffness_entries_match_reference() {
+        // Unit triangle, λ = μ = 1. Node 0 has ∇N₀ = (-1, -1), so the element
+        // (0,0) entry is [λ(-1)(-1) + μ(1·2 + (-1)(-1))]·area = 4·(1/2) = 2,
+        // and the (0,1) entry is [λ(-1)(-1) + μ(0 + (-1)(-1))]·area = 2·(1/2) = 1.
+        let tris = unit_triangle();
+        let triplets = stiffness(&tris, 1.0, 1.0);
+        let (mut k00, mut k10) = (0.0, 0.0);
+        for t in &triplets {
+            match (t.row, t.col) {
+                (0, 0) => k00 += t.val,
+                (1, 0) => k10 += t.val,
+                _ => {}
+            }
+        }
+        assert!(close(k00, 2.0));
+        assert!(close(k10, 1.0));
+    }
+
+    /// Evaluates the quadratic form `dᵀ K d` from the lower-triangle triplets.
+    fn quadratic(triplets: &Triplets, d: &[f64]) -> f64 {
+        triplets
+            .iter()
+            .map(|t| {
+                let weight = if t.row == t.col { 1.0 } else { 2.0 };
+                weight * t.val * d[t.row] * d[t.col]
+            })
+            .sum()
+    }
+
+    #[test]
+    fn dilatational_plus_deviatoric_equals_isotropic() {
+        // The volumetric/deviatoric split must reproduce the full stiffness for
+        // K = λ + 2μ/D. The dilatational part uses reduced integration, but on a
+        // constant-gradient triangle one point is exact, so the identity holds.
+        // Compare the quadratic forms for a few random-ish nodal displacement
+        // vectors, which exercises every matrix entry.
+        let tris = unit_triangle();
+        let (lambda, mu) = (1.0, 2.0);
+        let bulk = bulk_modulus::<2>(lambda, mu);
+
+        let iso = stiffness(&tris, lambda, mu);
+        let mut split = dilatational_stiffness(&tris, bulk);
+        split.extend(deviatoric_stiffness(&tris, mu));
+
+        for d in [
+            [1.0, 2.0, 3.0, -1.0, 0.5, 2.0],
+            [-2.0, 0.3, 1.5, 4.0, -0.7, 1.1],
+            [0.0, 0.0, 1.0, 0.0, 0.0, 1.0],
+        ] {
+            let expected = quadratic(&iso, &d);
+            let actual = quadratic(&split, &d);
+            assert!(
+                close(actual, expected),
+                "split quadratic form {actual} != isotropic {expected}"
+            );
+        }
+    }
+
+    #[test]
+    fn dilatational_stiffness_uses_reduced_integration() {
+        // Unit-square Quad4 with nodes (0,0), (1,0), (1,1), (0,1). The reduced
+        // 1-point rule sits at the reference centroid with weight 4 and
+        // |J| = 1/4, so |J| w = 1; the centroid physical gradients are ±0.5 and
+        // the dilatational stiffness is K gᵢ⊗gⱼ. This differs from full 2×2
+        // integration (e.g. the (N₀,x)-(N₁,x) entry is -K/4 here, while the
+        // exact integral is -K/3), which proves the reduced rule is in use.
+        let quads = vec![Quad4::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [1.0, 0.0]),
+            Node::new(2, [1.0, 1.0]),
+            Node::new(3, [0.0, 1.0]),
+        )];
+        let bulk = 3.0;
+        let triplets = dilatational_stiffness(&quads, bulk);
+
+        let g = [[-0.5, -0.5], [0.5, -0.5], [0.5, 0.5], [-0.5, 0.5]];
+        let mut dense = [[0.0; 8]; 8];
+        for t in &triplets {
+            dense[t.row][t.col] += t.val;
+        }
+        for i in 0..4 {
+            for j in 0..4 {
+                for a in 0..2 {
+                    for b in 0..2 {
+                        let row = i * 2 + a;
+                        let col = j * 2 + b;
+                        if row >= col {
+                            let expected = bulk * g[i][a] * g[j][b];
+                            assert!(
+                                close(dense[row][col], expected),
+                                "entry ({row},{col}): {} != {expected}",
+                                dense[row][col]
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn deviatoric_stiffness_ignores_pure_dilation() {
+        // u = α(x, y) is a pure dilation: ε = α I, tr ε = 2α, ε' = 0.
+        // Therefore a_dev(u, u) = 0 and a_dil(u, u) = ∫ K (2α)² dΩ = 2 K α²
+        // (the reference triangle has area 1/2).
+        let tris = unit_triangle();
+        let (lambda, mu) = (1.0, 2.0);
+        let bulk = bulk_modulus::<2>(lambda, mu);
+        let alpha = 0.3;
+        // Node-major DOFs: (u,v) at (0,0), (1,0), (0,1).
+        let d = [0.0, 0.0, alpha, 0.0, 0.0, alpha];
+
+        let dev = quadratic(&deviatoric_stiffness(&tris, mu), &d);
+        assert!(
+            dev.abs() < 1e-12,
+            "deviatoric energy should vanish: {dev:e}"
+        );
+
+        let dil = quadratic(&dilatational_stiffness(&tris, bulk), &d);
+        assert!(close(dil, 2.0 * bulk * alpha * alpha));
+    }
+
+    #[test]
+    fn dilatational_stiffness_ignores_pure_shear() {
+        // u = γ(y, 0) is a pure shear: ε_xx = ε_yy = 0, ε_xy = γ/2, tr ε = 0.
+        // Therefore a_dil(u, u) = 0 and a_dev(u, u) = ∫ 2μ (γ²/2) dΩ = μ γ²/2.
+        let tris = unit_triangle();
+        let (lambda, mu) = (1.0, 2.0);
+        let bulk = bulk_modulus::<2>(lambda, mu);
+        let gamma = 0.4;
+        // u = (γ y, 0): only the top-right node (0,1) has u_x = γ.
+        let d = [0.0, 0.0, 0.0, 0.0, gamma, 0.0];
+
+        let dil = quadratic(&dilatational_stiffness(&tris, bulk), &d);
+        assert!(
+            dil.abs() < 1e-12,
+            "dilatational energy should vanish: {dil:e}"
+        );
+
+        let dev = quadratic(&deviatoric_stiffness(&tris, mu), &d);
+        assert!(close(dev, mu * gamma * gamma / 2.0));
     }
 
     #[test]
@@ -713,6 +1004,9 @@ mod tests {
         let energy = energy_error(&units, |id, p| d[id * 2 + p], exact_strain, lambda, mu);
 
         assert!(l2 < 5e-2, "cantilever L2 error too large: {l2:e}");
-        assert!(energy < 2e-1, "cantilever energy error too large: {energy:e}");
+        assert!(
+            energy < 2e-1,
+            "cantilever energy error too large: {energy:e}"
+        );
     }
 }
