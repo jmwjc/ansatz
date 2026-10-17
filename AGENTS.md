@@ -1,14 +1,14 @@
 # AGENTS.md
 
-本文件面向 AI 编码代理，介绍 `rustfem` 项目的架构、构建方式与开发约定。项目暂无正式 README（仅有标题），`PLAN.md` 是主要的项目文档，本文件基于对实际代码的考察编写。
+本文件面向 AI 编码代理，介绍 `ansatz` 项目的架构、构建方式与开发约定。项目暂无正式 README（仅有标题），`PLAN.md` 是主要的项目文档，本文件基于对实际代码的考察编写。
 
 ## 1. 项目概述
 
-`rustfem` 是一个用 **Rust** 编写的通用有限元方法（FEM）库，目标是为结构力学/连续介质力学问题提供模块化的单元抽象、组装算子与稀疏线性求解。当前处于早期原型阶段：1D 桁架求解链路已可用（罚函数法施加本质边界条件 + faer 稀疏 Cholesky 求解），2D/3D 单元与积分方案框架已建立，物理问题扩展（平面应力/应变、线弹性等）仍在路线图上（见 `PLAN.md` 的 M1–M6 里程碑）。
+`ansatz` 是一个用 **Rust** 编写的**离散近似层**（不拥有求解器）：它把连续力学问题离散为稀疏代数系统——负责近似（形函数）、数值积分、组装，把 `Triplet`/`Doublet` 交给外部稀疏后端（默认 `faer`）。目标是同时容纳有限元与后续的无网格离散。
 
 ### 技术栈与关键配置（`Cargo.toml`）
 
-- 语言/工具链：Rust，**edition 2024**，crate 名 `rustfem`，版本 0.1.0。
+- 语言/工具链：Rust，**edition 2024**，crate 名 `ansatz`，版本 0.1.0。
 - 核心依赖：
   - `faer = "0.24.4"` — 稠密/稀疏线性代数（`SparseColMat`、`Triplet`、`Col`、稀疏 Cholesky/LU）。版本升级需谨慎，PLAN.md 明确要求单独提交。
   - `dhat = "0.3.3"`（可选）— 堆分配性能剖析。
@@ -36,14 +36,21 @@ src/
 │   ├── quad4.rs      # Quad4<D>：4 节点四边形
 │   └── poi1.rs       # Poi1<D>：1 节点点单元（集中力/约束作用点）
 ├── operation/
-│   ├── mod.rs        # Variable<D, P, N> trait（对 &[T]/Vec<T>  blanket impl）
-│   └── bar.rs        # 1D 桁架组装算子：stiffness / traction / body_force / displacement_penalty
+│   ├── mod.rs        # Variable<D, O, P, N> trait（含 symmetric_components）、Triplets/Doublets 类型别名
+│   ├── bar.rs        # 1D 桁架：stiffness / traction / body_force / displacement_penalty
+│   ├── heat.rs       # 热传导：conduction_stiffness / capacity / heat_source / heat_flux / convection / temperature_penalty / l2_error / h1_semierror
+│   └── elasticity.rs # 线弹性：stiffness / dilatational_ 与 deviatoric_stiffness / body_force / traction / displacement_penalty / l2_error / energy_error
 └── io/
     ├── mod.rs        # （目前为空文件）
     └── gmsh.rs       # GMSH v4.1 网格读取：read_gmsh、GmshMesh、FromGmsh trait
-test/msh/             # 测试用 GMSH 网格（patchtest.msh、patchtest1D.msh，含物理组 "Γᵍ"、"Ω"）
 examples/
-└── bar1d.rs          # 1D 桁架示例：GMSH 读取 + 组装 + 稀疏 Cholesky 求解（注释用英文）
+├── msh/              # 示例与测试用 GMSH 网格（bar1d、patchtest_tri3/quad4、cantilever、cook_*、elasticity_cli）
+├── bar1d.rs          # 1D 桁架（手工构造节点）+ 罚函数 + 稀疏 Cholesky
+├── patchtest2d.rs    # Tri3/Quad4 patch test
+├── cantilever.rs     # 平面应力悬臂梁，与解析解对比
+├── cook.rs           # Cook 膜平面应变，full/SRI 收敛对比
+└── elasticity_cli.rs # 由 TOML 配置驱动的线弹性 CLI（+ elasticity_cli.toml）
+book/                 # mdbook 用户手册（book.toml、src/*.md）
 ```
 
 ### 核心抽象（理解代码前必读）
@@ -51,18 +58,18 @@ examples/
 - **`Element<const D: usize, const P: usize, const N: usize>`**（`src/element/mod.rs:6`）：所有单元的核心 trait。`D` = 空间维数，`P` = 参数空间维数（0=点、1=线、2=面），`N` = 节点数。方法包括 `id()`、`shape()`、`derivative_shape()`、`vertices_coordinates()`、`coordinates()`、`jacobe()`（注意拼写为 `jacobe`，不是 `jacobian`）、`jacobe_mat()`。
 - **`IntegrationScheme<const P: usize, const G: usize>`**：积分点与权重（关联类型风格，编译期常量）。`FullIntegration` / `ReducedIntegration` 是标记子 trait，用于区分完全积分与减缩积分。
 - **积分规则是标记类型**（`GaussLegendre1D<N>`、`Dunavant<G>`、`TensorProductQuad<N>`、`Keast<G>`、`TensorProductHex<N>`、`Point`）：`IntegrationScheme` 的 impl 绑定到这些标记类型，以便同一 `(P, G)` 下区分不同拓扑。具体单元（如 `Seg2<D>`）再为自身实现 `IntegrationScheme` 并委托给对应标记类型。
-- **`Variable<D, P, N>`**（`src/operation/mod.rs:5`）：组装算子的输入抽象，`type Item: Element<D, P, N>`，对 `&[T]` 和 `Vec<T>` 有 blanket impl。新增算子时照此模式接收一组单元。
-- **`FromGmsh<D>`**（`src/io/gmsh.rs:19`）：单元类型与 GMSH element type 编号的桥接。新增单元接入 GMSH 读取时，在 io 层实现此 trait 即可（当前支持 Seg2=1、Tri3=2、Poi1=15）。
+- **`Variable<D, O, P, N>`**（`src/operation/mod.rs:49`）：组装算子的输入抽象，`type Item: Element<D, P, N>`，对 `&[T]` 和 `Vec<T>` 有 blanket impl。`O` 是未知场的张量阶（0=标量、1=向量），每节点自由度数为 `symmetric_components::<D>(O)` = `C(D+O-1, O)`。新增算子时照此模式接收一组单元。
+- **`FromGmsh<D>`**（`src/io/gmsh.rs:22`）：单元类型与 GMSH element type 编号的桥接。新增单元接入 GMSH 读取时，在 io 层实现此 trait 即可（当前支持 Seg2=1、Tri3=2、Poi1=15）。
 - **组装风格**：算子返回 `Vec<Triplet<usize, usize, f64>>`（刚度）或 `Vec<Doublet<usize, f64>>`（载荷），由调用方用 `faer::sparse::SparseColMat::try_new_from_triplets` 和 `sparse_vector::try_new_from_doublet` 合并。本质边界条件用**罚函数法**（`displacement_penalty`，罚数 α≈1e7），自然边界条件（体力/集中力）由 `body_force` / `traction` 组装。
 
-`examples/bar1d.rs` 是目前唯一端到端示例：读取 `test/msh/patchtest.msh`，构造 10 个 `Seg2<1>` 组成的 1D 杆（左端固定、均布体力 f=1、右端拉力 P=1），罚函数加约束后 `sp_cholesky` 求解。
+`examples/` 下的示例均为端到端可运行：`bar1d`（手工构造 10 个 `Seg2<1>`，左端固定、均布体力 f=1、右端拉力 P=1，罚函数加约束后 `sp_cholesky` 求解）、`patchtest2d`（Tri3/Quad4 patch test）、`cantilever`（平面应力，与解析解比较 L²/能量范数误差）、`cook`（平面应变收敛对比）、`elasticity_cli`（TOML 配置驱动的 CLI）。
 
 ## 3. 构建与测试命令
 
 ```bash
 cargo build              # 编译库
-cargo run --example bar1d   # 运行 examples/bar1d.rs 中的 1D 桁架 + GMSH 读取示例
-cargo test               # 运行全部单元测试（目前 13 个，全部内联在各模块的 #[cfg(test)] 中）
+cargo run --example bar1d   # 1D 桁架示例（不需要网格文件）
+cargo test               # 运行全部单元测试（目前 58 个，全部内联在各模块的 #[cfg(test)] 中）
 cargo clippy --all-targets  # 静态检查（注意：当前约 91 个警告，PLAN.md 的 M1 目标是清零，请勿新增）
 cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 dhat-heap.json（仓库根目录已有一份示例输出）
 ```
@@ -73,10 +80,10 @@ cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 
 
 ## 4. 测试策略与约定
 
-- **测试全部内联**：`src/element/mod.rs`（积分规则矩验证，如权重和、∫ξ²、Dunavant 33 点高精度）、各单元文件（形函数、雅可比、面积/体积）、`src/io/gmsh.rs`（用 `test/msh/` 下的真实网格文件做解析测试，这里用到 dev-dependency `tempfile`）。
+- **测试全部内联**：`src/element/mod.rs`（积分规则矩验证，如权重和、∫ξ²、Dunavant 33 点高精度）、各单元文件（形函数、雅可比、面积/体积）、`src/io/gmsh.rs`（用 `examples/msh/` 下的真实网格文件做解析测试，这里用到 dev-dependency `tempfile`）、`src/operation/{heat,elasticity}.rs`（patch test 与解析解回归）。
 - 浮点比较用近似相等（容差约 1e-12），项目里有现成的 `close(a, b)` 辅助函数可参考（`src/element/mod.rs:1041`）。
 - 新增单元时应为形函数、导数、雅可比写单元测试；新增物理模型时应先写回归测试（PLAN.md 设计原则：测试驱动）。
-- `test/msh/` 下的网格为 GMSH **v4.1** ASCII 格式；运行测试和示例依赖这些文件的相对路径，工作目录须为仓库根。
+- `examples/msh/` 下的网格为 GMSH **v4.1** ASCII 格式；运行测试和示例依赖这些文件的相对路径，工作目录须为仓库根。
 
 ## 5. 代码风格与提交规范
 
@@ -92,7 +99,7 @@ cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 
 ## 6. 已知缺口（与 PLAN.md 里程碑对照）
 
 - M1：CI 未配置；`cargo clippy` 有约 91 个警告未清零。
-- M2：`Problem` trait、`Truss1D`、求解器封装尚未建立；`examples/bar1d.rs` 是唯一示例。
-- M3/M4：`Tri3`/`Quad4`/`Seg2` 已实现并测试，但尚未有 2D/3D 求解示例；`Material` trait、平面应力/应变问题未实现。
-- M5：尚无 `Solver` trait；`parallel` feature 已声明但未使用；无基准测试。
-- M6：README 未写、CHANGELOG 不存在。
+- M2：`Problem` trait、`Truss1D`、求解器封装尚未建立（按定位，求解器应保持为可选外部后端）。
+- M3/M4：`Tri3`/`Quad4`/`Seg2` 已实现，`heat` 与 `elasticity`（平面应力/应变/3D）算子及 2D 算例已可用；`Material` trait 尚未抽象。
+- M5：`parallel` feature 已声明但未使用；无基准测试。
+- M6：`book/` 手册与 README 已建立，`CHANGELOG.md` 不存在。

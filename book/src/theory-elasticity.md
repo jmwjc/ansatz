@@ -1,6 +1,6 @@
 # 线弹性力学（Linear Elasticity）
 
-线弹性力学是结构/连续介质力学的核心物理问题，也是 `rustfem` 在 M3/M4 里程碑要扩展的方向（`Material` trait、平面应力/平面应变、3D 线弹性骨架）。与拉压杆、热传导不同，弹性体中的主变量是**向量场**（位移 $\mathbf u$），应力与应变是**二阶张量**，因此需要先厘清场量之间的基本算子，再走"强形式 → 弱形式 → 伽辽金离散 → 单元组装"的同一条有限元骨架。
+线弹性力学是结构/连续介质力学的核心物理问题，也是 `ansatz` 在 M3/M4 里程碑要扩展的方向（`Material` trait、平面应力/平面应变、3D 线弹性骨架）。与拉压杆、热传导不同，弹性体中的主变量是**向量场**（位移 $\mathbf u$），应力与应变是**二阶张量**，因此需要先厘清场量之间的基本算子，再走"强形式 → 弱形式 → 伽辽金离散 → 单元组装"的同一条有限元骨架。
 
 > 说明：弹性组装算子已实现于 `src/operation/elasticity.rs`（`stiffness`、`body_force`、`traction`、`displacement_penalty`、`lame_constants`、`plane_stress_lambda`）；`Material` trait、平面应力/应变与 3D 线弹性问题类型仍在路线图上（`PLAN.md` M3/M4）。
 
@@ -384,7 +384,7 @@ $$
 
 每个节点的 $D$ 个自由度编号连续（或交错），`id()` 返回的全局节点号需展开为 $D$ 个自由度。$\mathbf K$ 对称正定，用稀疏 Cholesky 求解；位移边界条件用罚函数法强加（与拉压杆的 `displacement_penalty` 同构，只是约束向量化）。
 
-## 8. 与 rustfem 抽象的对应
+## 8. 与 ansatz 抽象的对应
 
 ### 物理梯度与 B 矩阵
 

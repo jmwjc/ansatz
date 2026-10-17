@@ -1,10 +1,10 @@
 # 组装与求解
 
-`rustfem` 把"算贡献"与"建矩阵"分开：组装算子返回稀疏条目，调用方统一合并为稀疏矩阵/向量后求解。
+`ansatz` 把"算贡献"与"建矩阵"分开：组装算子返回稀疏条目，调用方统一合并为稀疏矩阵/向量后求解。
 
 ## 组装算子
 
-1D 桁架的全部组装算子位于 `rustfem::operation::bar`：
+1D 桁架的全部组装算子位于 `ansatz::operation::bar`：
 
 ### `stiffness` — 单元刚度
 
@@ -61,7 +61,7 @@ pub fn displacement_penalty<T, const D: usize>(
 ### 载荷向量
 
 ```rust
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::sparse_vector::try_new_from_doublet;
 
 let f = try_new_from_doublet(np, &doublets);   // → faer::Col<f64>
 ```
@@ -96,11 +96,11 @@ let d = llt.solve(&f);
 use faer::Side;
 use faer::prelude::*;
 use faer::sparse::SparseColMat;
-use rustfem::element::poi1::Poi1;
-use rustfem::element::seg2::Seg2;
-use rustfem::node::Node;
-use rustfem::operation::bar::{body_force, displacement_penalty, stiffness, traction};
-use rustfem::sparse_vector::try_new_from_doublet;
+use ansatz::element::poi1::Poi1;
+use ansatz::element::seg2::Seg2;
+use ansatz::node::Node;
+use ansatz::operation::bar::{body_force, displacement_penalty, stiffness, traction};
+use ansatz::sparse_vector::try_new_from_doublet;
 
 // 1. 构造单元
 let bars: Vec<Seg2<1>> = /* ... */;

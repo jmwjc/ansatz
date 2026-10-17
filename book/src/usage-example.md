@@ -1,6 +1,6 @@
 # 1D 桁架杆（bar1d）
 
-`examples/bar1d.rs` 是库的端到端示例：读取 GMSH 网格，构造一个 10 单元 1D 杆，施加约束与载荷，罚函数法加边界条件后稀疏 Cholesky 求解。下面逐段讲解。
+`examples/bar1d.rs` 是库的最小端到端示例：手工构造一个 11 节点 / 10 单元的 1D 杆，施加约束与载荷，罚函数法加边界条件后稀疏 Cholesky 求解。下面逐段讲解。（需要读取 GMSH 网格的示例见 `patchtest2d`、`cantilever`、`cook`、`elasticity_cli`。）
 
 ## 1. 性能剖析的全局分配器
 
@@ -12,17 +12,9 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 仅在 `dhat-heap` feature 启用时生效，替换全局分配器以记录堆分配。
 
-## 2. 读取网格
+## 2. 构造 1D 杆
 
-```rust
-let mesh = gmsh::read_gmsh::<2>("test/msh/patchtest.msh");
-let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ");
-let tris: Vec<Tri3<2>> = mesh.elements("Ω");
-```
-
-读入 2D 网格，并按物理组名取出线单元（`Γᵍ`）与三角形单元（`Ω`）。这一步演示了 GMSH 读取能力，但**不参与后续 1D 求解**——真正的杆是下面手工构造的。
-
-## 3. 构造 1D 杆
+`bar1d` 不依赖网格文件，直接按 `xᵢ = i/10` 生成节点与 `Seg2<1>` 单元（GMSH 读取的用法见「GMSH 网格读取」一章与 `patchtest2d` 示例）。
 
 ```rust
 let np = 11;          // 11 个节点
@@ -46,7 +38,7 @@ let right = Poi1::new(Node::new(np - 1, [1.0])); // 右端 x = 1
 
 两个点单元分别标记左端（约束点）与右端（加载点）。
 
-## 4. 刚度组装 + 罚函数约束
+## 3. 刚度组装 + 罚函数约束
 
 ```rust
 let mut triplets = stiffness(&bars, 1.0);       // EA = 1
@@ -63,7 +55,7 @@ let k = SparseColMat::<usize, f64>::try_new_from_triplets(np, np, &triplets).unw
 - `displacement_penalty`：左端施加固定约束 $u(0) = 0$，罚数 $α = 1e7$；
 - 罚刚度并入总刚度后，`try_new_from_triplets` 合并为 `11 × 11` 稀疏矩阵。
 
-## 5. 载荷组装
+## 4. 载荷组装
 
 ```rust
 let mut doublets = body_force(&bars, |_| 1.0);   // 自重：均布体力 f = 1
@@ -78,7 +70,7 @@ let f = try_new_from_doublet(np, &doublets);
 2. 右端集中拉力 $P = 1$；
 3. 罚函数法的等效载荷项（本例 $ū = 0$，故该项为零，但代码仍显式叠加）。
 
-## 6. 求解
+## 5. 求解
 
 ```rust
 let llt = k.sp_cholesky(Side::Lower).unwrap();

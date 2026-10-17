@@ -1,6 +1,6 @@
 # API 参考
 
-`rustfem` 的公共 API 按模块组织。以下为速查清单；各条目的完整说明见库内 rustdoc。
+`ansatz` 的公共 API 按模块组织。以下为速查清单；各条目的完整说明见库内 rustdoc。
 
 ## `node`
 

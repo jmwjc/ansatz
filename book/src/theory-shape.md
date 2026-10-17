@@ -16,7 +16,7 @@ $$
 u(\xi) = \sum_{a=1}^{N} N_a(\xi)\, u_a
 $$
 
-则称为**等参单元**（几何与场共用同一套形函数）。`rustfem` 的 `Element::coordinates` 实现的正是等参映射。
+则称为**等参单元**（几何与场共用同一套形函数）。`ansatz` 的 `Element::coordinates` 实现的正是等参映射。
 
 ## 形函数的两条基本性质
 
@@ -85,7 +85,7 @@ $$
 
 ## 形函数的导数
 
-弱形式里出现的是物理梯度 $\nabla_x N$，而形函数是参数坐标 $ξ$ 的函数，两者通过**链式法则 + 雅可比**联系，这正是下一章的内容。`rustfem` 中：
+弱形式里出现的是物理梯度 $\nabla_x N$，而形函数是参数坐标 $ξ$ 的函数，两者通过**链式法则 + 雅可比**联系，这正是下一章的内容。`ansatz` 中：
 
 - `derivative_shape` 返回**物理梯度** $\nabla_x N = [\partial N/\partial x_1, \dots, \partial N/\partial x_D]$（关于物理坐标求导，而非参数坐标），类型为 `[[f64; D]; N]`；
 - 各单元通过雅可比矩阵 $J = \partial x/\partial \xi$ 把参数导数变换为物理梯度：线单元取切向投影 $\nabla_x N = \pm \hat t/L$，面单元用 $\nabla_x N = J(J^\mathsf T J)^{-1} \nabla_\xi N$。

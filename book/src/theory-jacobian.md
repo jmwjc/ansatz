@@ -13,7 +13,7 @@ $$
 - 1D 单元（`Seg2` 嵌入任意维度）：`J` 是一个 $D$ 维切向量 $\partial x/\partial \xi$；
 - 2D 单元（`Tri3`/`Quad4`）：`J` 由两个 $D$ 维切向量组成（$\partial x/\partial \xi$ 与 $\partial x/\partial \eta$）。
 
-`rustfem` 的 `Element::jacobe_mat` 返回 `[[f64; D]; P]`，索引为 `[parametric][spatial]`：$J[d][i] = \partial x_i/\partial \xi_d$，即每个参数方向对应一个 $D$ 维切向量。
+`ansatz` 的 `Element::jacobe_mat` 返回 `[[f64; D]; P]`，索引为 `[parametric][spatial]`：$J[d][i] = \partial x_i/\partial \xi_d$，即每个参数方向对应一个 $D$ 维切向量。
 
 ## 链式法则
 

@@ -1,6 +1,6 @@
 # 核心抽象
 
-`rustfem` 的公共 API 由少数几个 trait 组织而成。理解这些 trait 是使用与扩展库的关键。
+`ansatz` 的公共 API 由少数几个 trait 组织而成。理解这些 trait 是使用与扩展库的关键。
 
 ## `Element<D, P, N>`：单元抽象
 
@@ -81,8 +81,8 @@ pub trait Variable<const D: usize, const P: usize, const N: usize> {
 组装算子（`stiffness`、`body_force` 等）通过 `Variable` 接收"一组单元"，而无需关心调用方持有的是切片还是 `Vec`。库为 `&[T]` 与 `Vec<T>` 提供了 blanket impl，因此两种容器都能直接传入：
 
 ```rust
-use rustfem::element::seg2::Seg2;
-use rustfem::operation::bar::stiffness;
+use ansatz::element::seg2::Seg2;
+use ansatz::operation::bar::stiffness;
 
 let bars: Vec<Seg2<1>> = /* ... */;
 let k1 = stiffness(&bars, ea);   // Vec<T> → 借用后按切片处理

@@ -1,13 +1,13 @@
 # GMSH 网格读取
 
-`rustfem` 的 `io` 模块支持读取 **GMSH v4.1 ASCII** 格式的 `.msh` 文件。
+`ansatz` 的 `io` 模块支持读取 **GMSH v4.1 ASCII** 格式的 `.msh` 文件。
 
 ## 入口函数
 
 ```rust
-use rustfem::io::gmsh::read_gmsh;
+use ansatz::io::gmsh::read_gmsh;
 
-let mesh = read_gmsh::<2>("test/msh/patchtest.msh");
+let mesh = read_gmsh::<2>("examples/msh/patchtest_tri3.msh");
 ```
 
 `read_gmsh::<D>` 解析文件并返回中间产物 `GmshMesh<D>`，其中 `D` 是期望的空间维数。它**只读文件、不构造具体单元类型**；类型化单元向量按需由 `GmshMesh::elements` 构造。
@@ -37,12 +37,12 @@ pub fn elements_by_tag<T: FromGmsh<D>>(&self, tag: i32) -> Vec<T>;
 ## 用法示例
 
 ```rust
-use rustfem::element::poi1::Poi1;
-use rustfem::element::seg2::Seg2;
-use rustfem::element::tri3::Tri3;
-use rustfem::io::gmsh::read_gmsh;
+use ansatz::element::poi1::Poi1;
+use ansatz::element::seg2::Seg2;
+use ansatz::element::tri3::Tri3;
+use ansatz::io::gmsh::read_gmsh;
 
-let mesh = read_gmsh::<2>("test/msh/patchtest.msh");
+let mesh = read_gmsh::<2>("examples/msh/patchtest_tri3.msh");
 
 let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ");   // 线单元（物理组名 Γᵍ）
 let tris: Vec<Tri3<2>> = mesh.elements("Ω");    // 三角形单元（物理组名 Ω）
@@ -78,4 +78,4 @@ triangles: 288
 - 必须包含 `$Entities` 与 `$Nodes` 段；
 - 物理组名可选（用于 `elements("名称")`），缺失时只能通过物理标签访问。
 
-测试网格位于 `test/msh/`：`patchtest.msh`（2D，含物理组 `Γᵍ`、`Ω`）与 `patchtest1D.msh`（1D）。
+示例与测试用网格位于 `examples/msh/`：`bar1d.msh`（1D）、`patchtest_tri3.msh` / `patchtest_quad4.msh`（2D，含物理组 `Γᵍ`、`Ω`）、`cantilever.msh`、`cook_{8,16,32,64}.msh`、`elasticity_cli.msh`。

@@ -21,8 +21,8 @@ $$
 `Seg2<D>` 可嵌入 1D/2D/3D 空间（`D` 任意），例如：
 
 ```rust
-use rustfem::element::seg2::Seg2;
-use rustfem::node::Node;
+use ansatz::element::seg2::Seg2;
+use ansatz::node::Node;
 
 // 1D 杆单元，端点 x = 0 与 x = 0.1
 let e = Seg2::new(Node::new(0, [0.0]), Node::new(1, [0.1]));
@@ -94,8 +94,8 @@ impl<const D: usize> Poi1<D> {
 点单元的参数空间维数为 0（$P = 0$），形函数恒等于 1，雅可比恒等于 1。它不产生刚度，只用于**定位**——代表一个约束点（`displacement_penalty`）或一个集中力作用点（`traction`）：
 
 ```rust
-use rustfem::element::poi1::Poi1;
-use rustfem::node::Node;
+use ansatz::element::poi1::Poi1;
+use ansatz::node::Node;
 
 // 表示"节点 0 处施加约束/载荷"
 let left = Poi1::new(Node::new(0, [0.0]));

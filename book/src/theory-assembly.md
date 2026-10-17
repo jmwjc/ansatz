@@ -32,7 +32,7 @@ $$
 K^e_{ij} \approx \sum_{g} \left[ \text{被积函数在积分点 } \xi_g \text{ 的取值} \right] \cdot |J| \cdot w_g
 $$
 
-`rustfem` 的组装算子正是按此结构写的：对每个单元、每个积分点，用形函数导数、雅可比 $|J|$ 与权重 $w_g$ 累加出 `Triplet`/`Doublet` 条目。
+`ansatz` 的组装算子正是按此结构写的：对每个单元、每个积分点，用形函数导数、雅可比 $|J|$ 与权重 $w_g$ 累加出 `Triplet`/`Doublet` 条目。
 
 ## 全局组装
 
