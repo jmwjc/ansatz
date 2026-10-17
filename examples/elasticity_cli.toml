@@ -1,0 +1,32 @@
+# Linear-elasticity CLI example configuration.
+#
+# Physical-region names are shared with the GMSH mesh and with the local
+# constants declared in `examples/elasticity_cli.rs`:
+#   Ω  : interior (solution domain)
+#   Γᵍ : essential (Dirichlet) boundary
+#   Γᵗ : natural (Neumann) boundary
+#
+# Body force, prescribed displacement, and prescribed traction are functions
+# of the physical coordinates `x`, `y`. Each component of `value` is either a
+# number (a constant) or a string expression, e.g. `"sin(pi * x) * cos(pi * y)"`.
+# Supported operators/functions: + - * / ^, parentheses, pi, e,
+# sin, cos, tan, exp, ln, sqrt, abs, sinh, cosh.
+
+[problem]
+type = "plane_stress"   # plane_stress | plane_strain
+
+[material]
+young = 1000.0
+poisson = 0.3
+
+[body_force]            # optional: distributed body force [fx(x, y), fy(x, y)]
+value = ["0.0", "0.0"]
+
+[essential]             # Γᵍ: prescribed displacement [ux(x, y), uy(x, y)]
+value = ["0.0", "0.0"]
+penalty = 1e7           # optional, defaults to 1e7
+
+[natural]               # Γᵗ: prescribed traction [tx(x, y), ty(x, y)]
+# e.g. a parabolic tensile traction across the right edge:
+# value = ["1.0 - (2*y - 1)^2", "0.0"]
+value = ["1.0", "0.0"]
