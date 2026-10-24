@@ -25,8 +25,7 @@ use ansatz::element::quad4::Quad4;
 use ansatz::element::seg2::Seg2;
 use ansatz::io::gmsh::read_gmsh;
 use ansatz::operation::elasticity::{
-    bulk_modulus, deviatoric_stiffness, dilatational_stiffness, displacement_penalty,
-    lame_constants, stiffness, traction,
+    Lame, deviatoric_stiffness, dilatational_stiffness, displacement_penalty, stiffness, traction,
 };
 use ansatz::sparse_vector::try_new_from_doublet;
 
@@ -42,19 +41,20 @@ const ALPHA: f64 = 1e7;
 /// `sri = false` uses the fully integrated Q4 stiffness; `sri = true` uses
 /// selective reduced integration (dilatational reduced + deviatoric full).
 fn solve(path: &str, sri: bool, nu: f64) -> (f64, usize, usize) {
-    let mesh = read_gmsh::<2>(path);
-    let units: Vec<Quad4<2>> = mesh.elements("Ω");
-    let left: Vec<Seg2<2>> = mesh.elements("Γu");
-    let right: Vec<Seg2<2>> = mesh.elements("Γt");
+    let mesh = read_gmsh::<2>(path).unwrap();
+    let units: Vec<Quad4<2>> = mesh.elements("Ω").unwrap();
+    let left: Vec<Seg2<2>> = mesh.elements("Γu").unwrap();
+    let right: Vec<Seg2<2>> = mesh.elements("Γt").unwrap();
 
     let max_id = mesh.nodes.keys().copied().max().unwrap();
     let n_dofs = (max_id + 1) * 2;
 
     // Plane strain: λ, μ from the 3D Lamé constants.
-    let (lambda, mu) = lame_constants(E, nu);
+    let lame = Lame::plane_strain(E, nu);
+    let (lambda, mu) = (lame.lambda, lame.mu);
 
     let mut triplets = if sri {
-        let bulk = bulk_modulus::<2>(lambda, mu);
+        let bulk = lame.bulk_modulus::<2>();
         let mut t = dilatational_stiffness(&units, bulk);
         t.extend(deviatoric_stiffness(&units, mu));
         t
@@ -70,7 +70,7 @@ fn solve(path: &str, sri: bool, nu: f64) -> (f64, usize, usize) {
     doublets.extend(traction(&right, |_| [0.0, TOTAL_LOAD / EDGE_LEN]));
 
     let k = SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
-    let f = try_new_from_doublet(n_dofs, &doublets);
+    let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
     let llt = k.sp_cholesky(Side::Lower).unwrap();
     let d = llt.solve(&f);
 

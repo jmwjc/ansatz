@@ -36,7 +36,7 @@ pub trait Element<const D: usize, const P: usize, const N: usize> {
 
     /// Inverse isoparametric map: returns the parametric coordinates `ξ` of the
     /// physical point `x` if `x` lies inside this element (up to
-    /// [`CONTAINS_TOL`]), or `None` otherwise.
+    /// `CONTAINS_TOL`), or `None` otherwise.
     fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; P]>;
 
     /// Whether the physical point `x` lies inside this element.

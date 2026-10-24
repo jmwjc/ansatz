@@ -8,7 +8,7 @@
 
 ### 技术栈与关键配置（`Cargo.toml`）
 
-- 语言/工具链：Rust，**edition 2024**，crate 名 `ansatz`，版本 0.2.0。
+- 语言/工具链：Rust，**edition 2024**，crate 名 `ansatz`，版本 0.3.0。
 - 核心依赖：
   - `faer = "0.24.4"` — 稠密/稀疏线性代数（`SparseColMat`、`Triplet`、`Col`、稀疏 Cholesky/LU）。版本升级需谨慎，PLAN.md 明确要求单独提交。
   - `dhat = "0.3.3"`（可选）— 堆分配性能剖析。
@@ -28,7 +28,8 @@
 src/
 ├── lib.rs            # 库入口，声明公共模块
 ├── node.rs           # Node<const D: usize> { id, coordinates: [f64; D] }
-├── sparse_vector.rs  # Doublet（类比 faer 的 Triplet）与 try_new_from_doublet → Col<f64>
+├── sparse_vector.rs  # Doublet（类比 faer 的 Triplet）与 try_new_from_doublet → Result<Col<f64>, DoubletError>
+├── spatial/          # 独立 AABB / SpatialIndex（FEM 点定位与无网格邻域搜索共用）
 ├── element/
 │   ├── mod.rs        # 核心 trait 与积分规则参考数据（约 1100 行，含单元测试）
 │   ├── seg2.rs       # Seg2<D>：2 节点线单元（1D/2D/3D）
@@ -36,13 +37,13 @@ src/
 │   ├── quad4.rs      # Quad4<D>：4 节点四边形
 │   └── poi1.rs       # Poi1<D>：1 节点点单元（集中力/约束作用点）
 ├── operation/
-│   ├── mod.rs        # Variable<D, O, P, N> trait（含 symmetric_components）、Triplets/Doublets 类型别名
-│   ├── bar.rs        # 1D 桁架：stiffness / traction / body_force / displacement_penalty
-│   ├── heat.rs       # 热传导：conduction_stiffness / capacity / heat_source / heat_flux / convection / temperature_penalty / l2_error / h1_semierror
-│   └── elasticity.rs # 线弹性：stiffness / dilatational_ 与 deviatoric_stiffness / body_force / traction / displacement_penalty / l2_error / energy_error
+│   ├── mod.rs        # Variable<D, C, P, N> trait（点查询/导数）与 Triplets/Doublets 类型别名
+│   ├── bar.rs        # 1D 桁架：stiffness / point_load / body_force / point_displacement_penalty
+│   ├── heat.rs       # 热传导：组装算子 + gradient / flux
+│   └── elasticity.rs # 线弹性：组装算子 + strain / stress
 └── io/
     ├── mod.rs        # （目前为空文件）
-    └── gmsh.rs       # GMSH v4.1 网格读取：read_gmsh、GmshMesh、FromGmsh trait
+    └── gmsh.rs       # GMSH v4.1 读取：read_gmsh、GmshMesh、NodeTable、PhysicalGroup、FromGmsh
 examples/
 ├── msh/              # 示例与测试用 GMSH 网格（bar1d、patchtest_tri3/quad4、cantilever、cook_*、elasticity_cli）
 ├── bar1d.rs          # 1D 桁架（手工构造节点）+ 罚函数 + 稀疏 Cholesky
@@ -58,9 +59,9 @@ book/                 # mdbook 用户手册（book.toml、src/*.md）
 - **`Element<const D: usize, const P: usize, const N: usize>`**（`src/element/mod.rs:6`）：所有单元的核心 trait。`D` = 空间维数，`P` = 参数空间维数（0=点、1=线、2=面），`N` = 节点数。方法包括 `id()`、`shape()`、`derivative_shape()`、`vertices_coordinates()`、`coordinates()`、`jacobe()`（注意拼写为 `jacobe`，不是 `jacobian`）、`jacobe_mat()`。
 - **`IntegrationScheme<const P: usize, const G: usize>`**：积分点与权重（关联类型风格，编译期常量）。`FullIntegration` / `ReducedIntegration` 是标记子 trait，用于区分完全积分与减缩积分。
 - **积分规则是标记类型**（`GaussLegendre1D<N>`、`Dunavant<G>`、`TensorProductQuad<N>`、`Keast<G>`、`TensorProductHex<N>`、`Point`）：`IntegrationScheme` 的 impl 绑定到这些标记类型，以便同一 `(P, G)` 下区分不同拓扑。具体单元（如 `Seg2<D>`）再为自身实现 `IntegrationScheme` 并委托给对应标记类型。
-- **`Variable<D, O, P, N>`**（`src/operation/mod.rs:49`）：组装算子的输入抽象，`type Item: Element<D, P, N>`，对 `&[T]` 和 `Vec<T>` 有 blanket impl。`O` 是未知场的张量阶（0=标量、1=向量），每节点自由度数为 `symmetric_components::<D>(O)` = `C(D+O-1, O)`。新增算子时照此模式接收一组单元。
-- **`FromGmsh<D>`**（`src/io/gmsh.rs:22`）：单元类型与 GMSH element type 编号的桥接。新增单元接入 GMSH 读取时，在 io 层实现此 trait 即可（当前支持 Seg2=1、Tri3=2、Poi1=15）。
-- **组装风格**：算子返回 `Vec<Triplet<usize, usize, f64>>`（刚度）或 `Vec<Doublet<usize, f64>>`（载荷），由调用方用 `faer::sparse::SparseColMat::try_new_from_triplets` 和 `sparse_vector::try_new_from_doublet` 合并。本质边界条件用**罚函数法**（`displacement_penalty`，罚数 α≈1e7），自然边界条件（体力/集中力）由 `body_force` / `traction` 组装。
+- **`Variable<D, C, P, N>`**（`src/operation/mod.rs`）：组装算子的输入抽象，`type Item: Element<D, P, N>`，对 `&[T]` 和 `Vec<T>` 有 blanket impl。`C` 是每节点自由度数/分量数；`Variable` 不编码张量阶，具体分量语义由问题模块解释。新增算子时照此模式接收一组单元。
+- **`FromGmsh<D>`**（`src/io/gmsh.rs`）：单元类型与 GMSH element type 编号的桥接，声明 `GMSH_ELEMENT_TYPE`、`GMSH_NODE_COUNT`，并实现 `from_gmsh(ids, &NodeTable<D>) -> Result<Self, MeshError>`。`NodeTable` 是稠密节点坐标表（`id == index`），`GmshMesh::physical_groups()` 提供按 tag 升序的物理组迭代。新增单元接入 GMSH 读取时，在 io 层实现此 trait 即可（当前支持 Seg2=1、Tri3=2、Quad4=3、Poi1=15）。
+- **组装风格**：算子返回 `Vec<Triplet<usize, usize, f64>>`（刚度）或 `Vec<Doublet<usize, f64>>`（载荷），由调用方用 `faer::sparse::SparseColMat::try_new_from_triplets` 和 `sparse_vector::try_new_from_doublet`（返回 `Result`）合并。`read_gmsh`、`GmshMesh::elements*`、`Variable::{value, derivative_value}` 也返回 `Result`，公开路径不使用 `unwrap`/`expect`/`panic!`。本质边界条件用**罚函数法**（`displacement_penalty`，罚数 α≈1e7），自然边界条件（体力/集中力）由 `body_force` / `traction` 组装。
 
 `examples/` 下的示例均为端到端可运行：`bar1d`（手工构造 10 个 `Seg2<1>`，左端固定、均布体力 f=1、右端拉力 P=1，罚函数加约束后 `sp_cholesky` 求解）、`patchtest2d`（Tri3/Quad4 patch test）、`cantilever`（平面应力，与解析解比较 L²/能量范数误差）、`cook`（平面应变收敛对比）、`elasticity_cli`（TOML 配置驱动的 CLI）。
 
@@ -69,8 +70,8 @@ book/                 # mdbook 用户手册（book.toml、src/*.md）
 ```bash
 cargo build              # 编译库
 cargo run --example bar1d   # 1D 桁架示例（不需要网格文件）
-cargo test               # 运行全部单元测试（目前 58 个，全部内联在各模块的 #[cfg(test)] 中）
-cargo clippy --all-targets  # 静态检查（注意：当前约 91 个警告，PLAN.md 的 M1 目标是清零，请勿新增）
+cargo test               # 运行全部单元测试（目前 86 个，全部内联在各模块的 #[cfg(test)] 中）
+cargo clippy --all-targets  # 静态检查（当前零警告，请勿新增）
 cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 dhat-heap.json（仓库根目录已有一份示例输出）
 ```
 
@@ -98,8 +99,8 @@ cargo run --release --example bar1d --features dhat-heap   # 堆剖析；生成 
 
 ## 6. 已知缺口（与 PLAN.md 里程碑对照）
 
-- M1：CI 未配置；`cargo clippy` 有约 91 个警告未清零。
+- M1：CI 未配置；`cargo clippy --all-targets` 当前零警告。
 - M2：`Problem` trait、`Truss1D`、求解器封装尚未建立（按定位，求解器应保持为可选外部后端）。
 - M3/M4：`Tri3`/`Quad4`/`Seg2` 已实现，`heat` 与 `elasticity`（平面应力/应变/3D）算子及 2D 算例已可用；`Material` trait 尚未抽象。
 - M5：`parallel` feature 已声明但未使用；无基准测试。
-- M6：`book/` 手册与 README 已建立，`CHANGELOG.md` 已建立（0.2.0）。
+- M6：`book/` 手册与 README 已建立，`CHANGELOG.md` 已建立（0.3.0）。

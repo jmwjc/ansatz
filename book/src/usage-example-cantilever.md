@@ -36,8 +36,8 @@ gmsh -2 examples/msh/cantilever.geo -format msh4 -o examples/msh/cantilever.msh
 
 ```rust
 // 平面应力材料常数：λ* = Eν/(1−ν²)，μ = E/(2(1+ν))
-let lambda = plane_stress_lambda(E, NU);
-let (_, mu) = lame_constants(E, NU);
+let lame = Lame::plane_stress(E, NU);
+let (lambda, mu) = (lame.lambda, lame.mu);
 
 // 单元刚度 K_{(a,p),(b,q)} = ∫ [λ ∂ₚNₐ ∂_qN_b + μ(δ_pq ∂ₖNₐ ∂ₖN_b + ∂_qNₐ ∂ₚN_b)] dΩ
 let mut triplets = stiffness(&units, lambda, mu);

@@ -1,6 +1,7 @@
 use crate::element::{Dunavant, Element, FullIntegration, IntegrationScheme, ReducedIntegration};
 use crate::node::Node;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Tri3<const D: usize> {
     nodes: [Node<D>; 3],
 }
@@ -15,6 +16,18 @@ impl<const D: usize> Tri3<D> {
 
 // Full integration for the triangle: 3-point Dunavant rule (algebraic degree 2);
 // reduced integration: 1 point (centroid).
+impl<const D: usize> Tri3<D> {
+    /// The element's nodes, in local ordering.
+    pub fn nodes(&self) -> &[Node<D>; 3] {
+        &self.nodes
+    }
+
+    /// Node at local index, or `None` if out of bounds.
+    pub fn node(&self, index: usize) -> Option<&Node<D>> {
+        self.nodes.get(index)
+    }
+}
+
 impl<const D: usize> IntegrationScheme<2, 1> for Tri3<D> {
     fn points() -> [[f64; 2]; 1] {
         <Dunavant<1> as IntegrationScheme<2, 1>>::points()
@@ -146,9 +159,7 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
             return None;
         }
 
-        let r2: f64 = (0..D)
-            .map(|i| (w[i] - l2 * u[i] - l3 * v[i]).powi(2))
-            .sum();
+        let r2: f64 = (0..D).map(|i| (w[i] - l2 * u[i] - l3 * v[i]).powi(2)).sum();
         let scale = uu.max(vv).max(1.0);
         if r2 > tol * tol * scale {
             return None;
@@ -156,6 +167,7 @@ impl<const D: usize> Element<D, 2, 3> for Tri3<D> {
         Some([l2, l3])
     }
 }
+
 
 #[cfg(test)]
 mod tests {

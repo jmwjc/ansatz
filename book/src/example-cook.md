@@ -50,7 +50,7 @@ let triplets = stiffness(&units, lambda, mu);   // Quad4 的 2×2 Gauss
 **SRI（选择性减缩积分）**把体积项与偏量项分开组装（见「线弹性力学」的体积–偏量分解）：
 
 ```rust
-let bulk = bulk_modulus::<2>(lambda, mu);       // K = λ + 2μ/D
+let bulk = Lame::plane_strain(E, nu).bulk_modulus::<2>(); // K = λ + 2μ/D
 let mut triplets = dilatational_stiffness(&units, bulk); // 减缩 1 点积分
 triplets.extend(deviatoric_stiffness(&units, mu));       // 2×2 完全积分
 ```

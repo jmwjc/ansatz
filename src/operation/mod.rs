@@ -3,6 +3,7 @@ pub mod elasticity;
 pub mod heat;
 
 use std::collections::BTreeSet;
+use std::fmt;
 
 use crate::element::Element;
 use crate::sparse_vector::Doublet;
@@ -18,86 +19,154 @@ pub type Doublets = Vec<Doublet<usize, f64>>;
 /// assemble `K` and `F` together.
 pub type TripletsAndDoublets = (Triplets, Doublets);
 
-/// Number of independent components of a fully symmetric tensor of order `O`
-/// in `D` spatial dimensions:
-/// `C(D + O - 1, O) = (D + O - 1)! / ((D - 1)! · O!)`.
-///
-/// This yields `1` for `O = 0`, `D` for `O = 1`, and `D(D+1)/2` for `O = 2`,
-/// and generalizes to any tensor order. It is evaluated as the binomial
-/// product `C(n, k)` with `n = D + O - 1` and `k = min(O, D - 1)`, keeping the
-/// intermediate values bounded instead of computing the factorials first.
-const fn symmetric_components<const D: usize>(order: usize) -> usize {
-    let n = D + order - 1;
-    let k = if order < D - 1 { order } else { D - 1 };
-    let mut c = 1usize;
-    let mut i = 0usize;
-    while i < k {
-        c = c * (n - k + 1 + i) / (i + 1);
-        i += 1;
-    }
-    c
+fn node_coefficients(
+    coefficients: &[f64],
+    node_id: usize,
+    number_of_components: usize,
+) -> Result<&[f64], VariableError> {
+    let start = node_id
+        .checked_mul(number_of_components)
+        .ok_or(VariableError::DofOverflow)?;
+    let end = start
+        .checked_add(number_of_components)
+        .ok_or(VariableError::DofOverflow)?;
+    coefficients
+        .get(start..end)
+        .ok_or(VariableError::CoefficientOutOfRange {
+            node_id,
+            start,
+            len: coefficients.len(),
+            number_of_components,
+        })
 }
+
+/// Errors produced while evaluating a variable field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VariableError {
+    /// The coefficient vector is too short for a node's degree of freedom range.
+    CoefficientOutOfRange {
+        node_id: usize,
+        start: usize,
+        len: usize,
+        number_of_components: usize,
+    },
+    /// Computing a node's coefficient offset overflowed `usize`.
+    DofOverflow,
+}
+
+impl fmt::Display for VariableError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CoefficientOutOfRange {
+                node_id,
+                start,
+                len,
+                number_of_components,
+            } => write!(
+                f,
+                "node {node_id} needs coefficients [{start}..{}], but the vector has length {len}",
+                start.saturating_add(*number_of_components)
+            ),
+            Self::DofOverflow => write!(f, "degree-of-freedom offset overflowed usize"),
+        }
+    }
+}
+
+impl std::error::Error for VariableError {}
 
 /// A collection of elements over which an unknown (variable) field is defined.
 ///
 /// The const generic parameters are:
 /// - `D`: spatial dimension of the element;
-/// - `O`: tensor order of the variable (0 = scalar, 1 = vector, 2 = second-order
-///   tensor, …);
+/// - `C`: number of scalar degrees of freedom per node;
 /// - `P`: parametric dimension of the element;
 /// - `N`: number of nodes per element.
-pub trait Variable<const D: usize, const O: usize, const P: usize, const N: usize> {
+pub trait Variable<const D: usize, const C: usize, const P: usize, const N: usize> {
     type Item: Element<D, P, N>;
     fn iter(&self) -> impl Iterator<Item = &Self::Item>;
 
-    /// Number of global scalar degrees of freedom (DOFs) over which this
-    /// variable is defined: the number of unique node ids appearing as element
-    /// vertices, multiplied by the number of independent components per node of
-    /// a fully symmetric tensor of order `O`
-    /// ([`symmetric_components`] = `C(D + O - 1, O)`).
+    /// Number of global scalar degrees of freedom (DOFs): number of unique
+    /// node ids multiplied by the number of components `C` per node.
     fn num_dofs(&self) -> usize {
         self.iter()
             .flat_map(|elm| elm.id())
             .collect::<BTreeSet<_>>()
             .len()
-            * const { symmetric_components::<D>(O) }
+            * C
     }
 
-    /// Evaluates the field represented by this variable at the physical point
-    /// `x`, by locating the element containing `x` ([`Element::contains`]) and
-    /// interpolating its nodal coefficients through the shape functions.
+    /// Locates the element containing the physical point `x`.
     ///
-    /// `coefficients` is the global coefficient vector, of length
-    /// `self.num_dofs()`; node `n` owns `m` scalar coefficients
-    /// `coefficients[n * m .. (n + 1) * m]` (node ids are expected to be
-    /// 0-based DOF indices), where
-    /// `m = symmetric_components::<D>(O) = C(D + O - 1, O)` is the number of
-    /// independent components of a fully symmetric tensor of order `O`. The
-    /// result is a `Vec<f64>` of length `m`.
+    /// This is a linear scan; it avoids storing a spatial index for the
+    /// low-frequency point queries this API targets.
+    fn locate(&self, x: [f64; D]) -> Option<(&Self::Item, [f64; P])> {
+        self.iter()
+            .find_map(|elm| elm.local_coordinates(x).map(|xi| (elm, xi)))
+    }
+
+    /// Evaluates the field at the physical point `x`.
     ///
-    /// Returns `None` when `x` lies outside every element; on a shared boundary
-    /// the first element reporting containment wins (the interpolation is
-    /// continuous there, so the result is independent of that choice).
-    fn value(&self, x: [f64; D], coefficients: &[f64]) -> Option<Vec<f64>> {
-        for elm in self.iter() {
-            if let Some(ξ) = elm.local_coordinates(x) {
-                let shape = elm.shape(ξ);
-                let id = elm.id();
-                let m = const { symmetric_components::<D>(O) };
-                let mut acc = vec![0.0; m];
-                for i in 0..N {
-                    let start = id[i] * m;
-                    for k in 0..m {
-                        acc[k] += shape[i] * coefficients[start + k];
-                    }
-                }
-                return Some(acc);
+    /// `coefficients` uses the global layout `node * C + component`. Returns
+    /// `Ok(None)` if `x` is outside every element.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`VariableError::CoefficientOutOfRange`] or
+    /// [`VariableError::DofOverflow`] for an invalid coefficient layout.
+    fn value(
+        &self,
+        x: [f64; D],
+        coefficients: &[f64],
+    ) -> Result<Option<[f64; C]>, VariableError> {
+        let Some((elm, xi)) = self.locate(x) else {
+            return Ok(None);
+        };
+
+        let shape = elm.shape(xi);
+        let nodes_id = elm.id();
+        let mut acc = [0.0; C];
+
+        for a in 0..N {
+            let coefficients_at_node = node_coefficients(coefficients, nodes_id[a], C)?;
+            for k in 0..C {
+                acc[k] += shape[a] * coefficients_at_node[k];
             }
         }
-        None
+
+        Ok(Some(acc))
+    }
+
+    /// Derivative of each independent field component at physical point `x`.
+    ///
+    /// The result is indexed as `derivative[i][k] = ∂u_k / ∂x_i`, with shape
+    /// `[[f64; C]; D]`. Returns `Ok(None)` if `x` is outside every element.
+    fn derivative_value(
+        &self,
+        x: [f64; D],
+        coefficients: &[f64],
+    ) -> Result<Option<[[f64; C]; D]>, VariableError> {
+        let Some((elm, xi)) = self.locate(x) else {
+            return Ok(None);
+        };
+
+        let dshape = elm.derivative_shape(xi);
+        let node_ids = elm.id();
+        let mut derivative = [[0.0_f64; C]; D];
+
+        for a in 0..N {
+            let coefficients_at_node = node_coefficients(coefficients, node_ids[a], C)?;
+            for (i, row) in derivative.iter_mut().enumerate() {
+                for (k, value) in row.iter_mut().enumerate() {
+                    *value += dshape[a][i] * coefficients_at_node[k];
+                }
+            }
+        }
+
+        Ok(Some(derivative))
     }
 }
-impl<T, const D: usize, const O: usize, const P: usize, const N: usize> Variable<D, O, P, N> for &[T]
+impl<T, const D: usize, const C: usize, const P: usize, const N: usize>
+    Variable<D, C, P, N> for &[T]
 where
     T: Element<D, P, N>,
 {
@@ -107,7 +176,8 @@ where
         <[T]>::iter(self)
     }
 }
-impl<T, const D: usize, const O: usize, const P: usize, const N: usize> Variable<D, O, P, N> for Vec<T>
+impl<T, const D: usize, const C: usize, const P: usize, const N: usize>
+    Variable<D, C, P, N> for Vec<T>
 where
     T: Element<D, P, N>,
 {
@@ -134,14 +204,14 @@ mod tests {
         ];
 
         // Vec<T> and &[T] blanket impls must agree.
-        assert_eq!(Variable::<1, 0, 1, 2>::num_dofs(&bars), 4);
-        assert_eq!(Variable::<1, 0, 1, 2>::num_dofs(&bars.as_slice()), 4);
+        assert_eq!(Variable::<1, 1, 1, 2>::num_dofs(&bars), 4);
+        assert_eq!(Variable::<1, 1, 1, 2>::num_dofs(&bars.as_slice()), 4);
     }
 
     #[test]
     fn num_dofs_empty_variable_is_zero() {
         let bars: Vec<Seg2<1>> = Vec::new();
-        assert_eq!(Variable::<1, 0, 1, 2>::num_dofs(&bars), 0);
+        assert_eq!(Variable::<1, 1, 1, 2>::num_dofs(&bars), 0);
     }
 
     #[test]
@@ -151,9 +221,9 @@ mod tests {
             Node::new(0, [0.0, 0.0]),
             Node::new(1, [1.0, 0.0]),
         )];
-        assert_eq!(Variable::<2, 0, 1, 2>::num_dofs(&bars), 2); // scalar: 2 * 1
-        assert_eq!(Variable::<2, 1, 1, 2>::num_dofs(&bars), 4); // vector: 2 * 2
-        assert_eq!(Variable::<2, 2, 1, 2>::num_dofs(&bars), 6); // symmetric 2nd-order: 2 * 3
+        assert_eq!(Variable::<2, 1, 1, 2>::num_dofs(&bars), 2); // scalar: 2 * 1
+        assert_eq!(Variable::<2, 2, 1, 2>::num_dofs(&bars), 4); // vector: 2 * 2
+        assert_eq!(Variable::<2, 3, 1, 2>::num_dofs(&bars), 6); // symmetric 2nd-order: 2 * 3
     }
 
     #[test]
@@ -166,15 +236,15 @@ mod tests {
         let coefficients = [0.0, 2.0, 4.0];
 
         assert_eq!(
-            Variable::<1, 0, 1, 2>::value(&bars, [1.0], &coefficients),
-            Some(vec![1.0])
+            Variable::<1, 1, 1, 2>::value(&bars, [1.0], &coefficients).unwrap(),
+            Some([1.0])
         );
         assert_eq!(
-            Variable::<1, 0, 1, 2>::value(&bars, [3.0], &coefficients),
-            Some(vec![3.0])
+            Variable::<1, 1, 1, 2>::value(&bars, [3.0], &coefficients).unwrap(),
+            Some([3.0])
         );
         assert_eq!(
-            Variable::<1, 0, 1, 2>::value(&bars, [5.0], &coefficients),
+            Variable::<1, 1, 1, 2>::value(&bars, [5.0], &coefficients).unwrap(),
             None
         );
     }
@@ -190,8 +260,8 @@ mod tests {
         let coefficients = [1.0, 2.0, 3.0, 0.0];
 
         assert_eq!(
-            Variable::<2, 1, 1, 2>::value(&bars, [1.0, 0.0], &coefficients),
-            Some(vec![2.0, 1.0])
+            Variable::<2, 2, 1, 2>::value(&bars, [1.0, 0.0], &coefficients).unwrap(),
+            Some([2.0, 1.0])
         );
     }
 
@@ -206,8 +276,35 @@ mod tests {
         let coefficients = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
 
         assert_eq!(
-            Variable::<2, 2, 1, 2>::value(&bars, [1.0, 0.0], &coefficients),
-            Some(vec![2.5, 3.5, 4.5])
+            Variable::<2, 3, 1, 2>::value(&bars, [1.0, 0.0], &coefficients).unwrap(),
+            Some([2.5, 3.5, 4.5])
         );
     }
+
+    #[test]
+    fn value_rejects_short_coefficients() {
+        let bars: Vec<Seg2<1>> = vec![Seg2::new(Node::new(0, [0.0]), Node::new(1, [1.0]))];
+
+        let err = Variable::<1, 1, 1, 2>::value(&bars, [0.5], &[0.0]).unwrap_err();
+        assert!(matches!(
+            err,
+            super::VariableError::CoefficientOutOfRange { .. }
+        ));
+    }
+
+    #[test]
+    fn derivative_value_of_linear_vector_field() {
+        let bars: Vec<Seg2<2>> = vec![Seg2::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [1.0, 0.0]),
+        )];
+        // u = (1 + 2x, 2 - 2x)
+        let coefficients = [1.0, 2.0, 3.0, 0.0];
+
+        let derivative = Variable::<2, 2, 1, 2>::derivative_value(&bars, [0.5, 0.0], &coefficients)
+            .unwrap()
+            .unwrap();
+        assert_eq!(derivative, [[2.0, -2.0], [0.0, 0.0]]);
+    }
+
 }

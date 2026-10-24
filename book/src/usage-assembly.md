@@ -14,7 +14,7 @@ pub fn stiffness<T, const P: usize, const N: usize, const G: usize>(
     ea: f64,
 ) -> Vec<Triplet<usize, usize, f64>>
 where
-    T: Variable<1, P, N>,
+    T: Variable<1, 1, P, N>,
     T::Item: Element<1, P, N> + FullIntegration<P, G>,
 ```
 
@@ -63,7 +63,7 @@ pub fn displacement_penalty<T, const D: usize>(
 ```rust
 use ansatz::sparse_vector::try_new_from_doublet;
 
-let f = try_new_from_doublet(np, &doublets);   // → faer::Col<f64>
+let f = try_new_from_doublet(np, &doublets).unwrap();   // → faer::Col<f64>
 ```
 
 `try_new_from_doublet` 把 `Doublet` 累加到长度为 `np` 的稠密向量中（重复下标自然累加）。
@@ -99,7 +99,9 @@ use faer::sparse::SparseColMat;
 use ansatz::element::poi1::Poi1;
 use ansatz::element::seg2::Seg2;
 use ansatz::node::Node;
-use ansatz::operation::bar::{body_force, displacement_penalty, stiffness, traction};
+use ansatz::operation::bar::{
+    body_force, point_displacement_penalty, point_load, stiffness,
+};
 use ansatz::sparse_vector::try_new_from_doublet;
 
 // 1. 构造单元
@@ -109,17 +111,17 @@ let right = Poi1::new(Node::new(10, [1.0]));      // 右端加载点
 
 // 2. 刚度：单元 + 罚函数约束
 let mut triplets = stiffness(&bars, 1.0);
-let (pen_k, pen_f) = displacement_penalty(&vec![left], 1e7, 0.0);
+let (pen_k, pen_f) = point_displacement_penalty(&vec![left], 1e7, 0.0);
 triplets.extend(pen_k);
 
 // 3. 载荷：体力 + 集中力 + 罚函数载荷
 let mut doublets = body_force(&bars, |_| 1.0);
-doublets.extend(traction(&vec![right], 1.0));
+doublets.extend(point_load(&vec![right], [1.0]));
 doublets.extend(pen_f);
 
 // 4. 合并并求解
 let k = SparseColMat::<usize, f64>::try_new_from_triplets(11, 11, &triplets).unwrap();
-let f = try_new_from_doublet(11, &doublets);
+let f = try_new_from_doublet(11, &doublets).unwrap();
 let llt = k.sp_cholesky(Side::Lower).unwrap();
 let d = llt.solve(&f);
 ```

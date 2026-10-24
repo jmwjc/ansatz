@@ -1,3 +1,8 @@
+#![cfg_attr(
+    not(test),
+    deny(clippy::unwrap_used, clippy::expect_used, clippy::panic)
+)]
+
 //! `ansatz` — an approximation layer that turns a continuum mechanics problem into a
 //! sparse algebraic system.
 //!
@@ -19,11 +24,13 @@
 //!
 //! - [`node`]: node types.
 //! - [`element`]: the element trait (shape functions, Jacobian, etc.) and concrete elements (`Seg2`, `Tri3`, `Poi1`).
-//! - [`operation`]: assembly-related abstractions (`Variable` and the stiffness, load, and penalty assembly operators).
+//! - [`operation`]: assembly abstractions (`Variable`, stiffness/load/penalty operators) and post-processing (`value`, `gradient`, `divergence`, `curl`, nodal recovery).
 //! - [`io`]: mesh file reading (GMSH).
+//! - [`spatial`]: AABB and broad-phase spatial index shared by FEM point location and meshfree neighbour search.
 
 pub mod element;
 pub mod io;
 pub mod node;
 pub mod operation;
 pub mod sparse_vector;
+pub mod spatial;

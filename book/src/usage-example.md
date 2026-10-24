@@ -45,23 +45,23 @@ let mut triplets = stiffness(&bars, 1.0);       // EA = 1
 
 let alpha: f64 = 1e7;
 let (penalty_triplets, penalty_doublets) =
-    displacement_penalty(&vec![left], alpha, 0.0);
+    point_displacement_penalty(&vec![left], alpha, 0.0);
 triplets.extend(penalty_triplets);
 
 let k = SparseColMat::<usize, f64>::try_new_from_triplets(np, np, &triplets).unwrap();
 ```
 
 - `stiffness(&bars, 1.0)`：组装单元刚度（$EA = 1$）；
-- `displacement_penalty`：左端施加固定约束 $u(0) = 0$，罚数 $α = 1e7$；
+- `point_displacement_penalty`：左端施加固定约束 $u(0) = 0$，罚数 $α = 1e7$；
 - 罚刚度并入总刚度后，`try_new_from_triplets` 合并为 `11 × 11` 稀疏矩阵。
 
 ## 4. 载荷组装
 
 ```rust
 let mut doublets = body_force(&bars, |_| 1.0);   // 自重：均布体力 f = 1
-doublets.extend(traction(&vec![right], 1.0));     // 右端集中拉力 P = 1
+doublets.extend(point_load(&vec![right], [1.0]));     // 右端集中拉力 P = 1
 doublets.extend(penalty_doublets);                // 罚载荷
-let f = try_new_from_doublet(np, &doublets);
+let f = try_new_from_doublet(np, &doublets).unwrap();
 ```
 
 三种载荷依次叠加：

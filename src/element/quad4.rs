@@ -3,6 +3,7 @@ use crate::element::{
 };
 use crate::node::Node;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Quad4<const D: usize> {
     nodes: [Node<D>; 4],
 }
@@ -16,6 +17,18 @@ impl<const D: usize> Quad4<D> {
 }
 
 // Quadrilateral full integration: 2×2 tensor product (4 points, degree 3); reduced integration: 1 point (centroid).
+impl<const D: usize> Quad4<D> {
+    /// The element's nodes, in local ordering.
+    pub fn nodes(&self) -> &[Node<D>; 4] {
+        &self.nodes
+    }
+
+    /// Node at local index, or `None` if out of bounds.
+    pub fn node(&self, index: usize) -> Option<&Node<D>> {
+        self.nodes.get(index)
+    }
+}
+
 impl<const D: usize> IntegrationScheme<2, 1> for Quad4<D> {
     fn points() -> [[f64; 2]; 1] {
         <TensorProductQuad<1> as IntegrationScheme<2, 1>>::points()
@@ -142,10 +155,14 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
         ];
         [
             std::array::from_fn(|i| {
-                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dξ[k]).sum()
+                (0..4)
+                    .map(|k| self.nodes[k].coordinates[i] * dn_dξ[k])
+                    .sum()
             }),
             std::array::from_fn(|i| {
-                (0..4).map(|k| self.nodes[k].coordinates[i] * dn_dη[k]).sum()
+                (0..4)
+                    .map(|k| self.nodes[k].coordinates[i] * dn_dη[k])
+                    .sum()
             }),
         ]
     }
@@ -201,6 +218,7 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
         Some([ξ, η])
     }
 }
+
 
 #[cfg(test)]
 mod tests {

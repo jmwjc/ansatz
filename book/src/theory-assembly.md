@@ -84,8 +84,8 @@ for i in 0..N {
 
 ```rust
 let mut doublets = body_force(&bars, |_| 1.0);   // 体力
-doublets.extend(traction(&vec![right], 1.0));     // 集中力
-let f = try_new_from_doublet(np, &doublets);      // 合并为 Col<f64>
+doublets.extend(point_load(&vec![right], [1.0]));     // 集中力
+let f = try_new_from_doublet(np, &doublets).unwrap();      // 合并为 Col<f64>
 ```
 
 最终 $K$ 与 $F$ 交给稀疏求解器（对称正定时用 Cholesky）求解。

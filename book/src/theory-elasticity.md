@@ -2,7 +2,7 @@
 
 线弹性力学是结构/连续介质力学的核心物理问题，也是 `ansatz` 在 M3/M4 里程碑要扩展的方向（`Material` trait、平面应力/平面应变、3D 线弹性骨架）。与拉压杆、热传导不同，弹性体中的主变量是**向量场**（位移 $\mathbf u$），应力与应变是**二阶张量**，因此需要先厘清场量之间的基本算子，再走"强形式 → 弱形式 → 伽辽金离散 → 单元组装"的同一条有限元骨架。
 
-> 说明：弹性组装算子已实现于 `src/operation/elasticity.rs`（`stiffness`、`body_force`、`traction`、`displacement_penalty`、`lame_constants`、`plane_stress_lambda`）；`Material` trait、平面应力/应变与 3D 线弹性问题类型仍在路线图上（`PLAN.md` M3/M4）。
+> 说明：弹性组装算子已实现于 `src/operation/elasticity.rs`（`stiffness`、`body_force`、`traction`、`displacement_penalty`、`Lame`）；`Material` trait、平面应力/应变与 3D 线弹性问题类型仍在路线图上（`PLAN.md` M3/M4）。
 
 ## 1. 场量与基础微分算子
 
@@ -403,11 +403,11 @@ $$
 | `body_force(v, f)` | `body_force(v, f)` | $F_{a,p} = \sum_g N_a\, f_p\, |J|\, w_g$（向量载荷） |
 | `traction(v, p)` | `traction(v, t)` | $F_{a,p} = \int_{\Gamma_t} N_a\, \bar t_p\, d\Gamma$（面力，向量） |
 | `displacement_penalty(v, α, ū)` | `displacement_penalty(v, α, ū)` | 罚函数强加向量位移（$\delta_{pq}$，每个分量各罚一次） |
-| —（新增） | `lame_constants(E, ν)` / `plane_stress_lambda(E, ν)` | 由 $E,\nu$ 生成 $\lambda,\mu$ 或平面应力 $\lambda^*$ |
+| —（新增） | `Lame::plane_stress(E, ν)` / `Lame::plane_strain(E, ν)` | 由 $E,\nu$ 生成 $\lambda,\mu$ 或平面应力 $\lambda^*$ |
 
 要点：
 
-- `elasticity::stiffness` 与 `bar::stiffness` 同骨架，仅把标量 $EA$ 换成 $\lambda,\mu$、把标量导数点积换成张量分量求和（见上文「张量（指标）形式的单元刚度」小节）：二者都在同一套 `Variable<D, O, P, N>` + `IntegrationScheme` 骨架上累加 `Triplet`；
+- `elasticity::stiffness` 与 `bar::stiffness` 同骨架，仅把标量 $EA$ 换成 $\lambda,\mu$、把标量导数点积换成张量分量求和（见上文「张量（指标）形式的单元刚度」小节）：二者都在同一套 `Variable<D, C, P, N>` + `IntegrationScheme` 骨架上累加 `Triplet`；
 - 位移是向量，每个节点的 $D$ 个自由度对应 $D\times D$ 的刚度分块与 $D$ 维载荷分量，全局自由度编号须把节点号映射为 $D$ 个连续编号；
 - **张量表示**贯穿始终：$\boldsymbol\varepsilon = \operatorname{sym}\nabla\mathbf u$、$\boldsymbol\sigma = \mathbf C:\boldsymbol\varepsilon$ 用指标记号写出，而 $\nabla_x N_a$ 由 `derivative_shape` 按 $\nabla_x N = j_\alpha g^{\alpha\beta}\partial_\beta N$ 直接给出——这对任意空间维度 $D$（含曲面单元嵌入 3D）自然成立，无需运行时矩阵求逆（见「雅可比与坐标映射」章）。
 

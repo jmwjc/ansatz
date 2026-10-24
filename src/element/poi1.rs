@@ -1,6 +1,7 @@
 use crate::element::{Element, FullIntegration, IntegrationScheme, Point, ReducedIntegration};
 use crate::node::Node;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Poi1<const D: usize> {
     pub nodes: Node<D>,
 }
@@ -8,6 +9,13 @@ pub struct Poi1<const D: usize> {
 impl<const D: usize> Poi1<D> {
     pub fn new(node: Node<D>) -> Self {
         Poi1 { nodes: node }
+    }
+}
+
+impl<const D: usize> Poi1<D> {
+    /// The point element's node.
+    pub fn node(&self) -> &Node<D> {
+        &self.nodes
     }
 }
 
@@ -60,7 +68,7 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
     }
 
     /// A point element contains exactly its node location: returns `Some([])`
-    /// when `x` coincides with the node within [`super::CONTAINS_TOL`].
+    /// when `x` coincides with the node within `CONTAINS_TOL`.
     fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 0]> {
         let tol = super::CONTAINS_TOL;
         let c = self.nodes.coordinates;
@@ -72,6 +80,7 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
         }
     }
 }
+
 
 #[cfg(test)]
 mod tests {

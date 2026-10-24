@@ -69,14 +69,21 @@ pub trait ReducedIntegration<const P: usize, const G: usize>: IntegrationScheme<
 
 具体单元再为自身实现 `IntegrationScheme`，并委托给对应标记类型。例如 `Seg2` 的完全积分委托给 `GaussLegendre1D<2>`，`Tri3` 的完全积分委托给 `Dunavant<3>`。
 
-## `Variable<D, P, N>`：算子输入抽象
+## `Variable<D, C, P, N>`：算子输入与后处理抽象
 
 ```rust
-pub trait Variable<const D: usize, const P: usize, const N: usize> {
+pub trait Variable<
+    const D: usize,
+    const C: usize,
+    const P: usize,
+    const N: usize,
+> {
     type Item: Element<D, P, N>;
     fn iter(&self) -> impl Iterator<Item = &Self::Item>;
 }
 ```
+
+`C` 是每节点自由度数/分量数；`Variable` 不再编码张量阶，分量的物理含义由具体问题模块解释。`Variable` 提供 `num_dofs`、点查询 `locate(x)`、`value`、`derivative_value`；点查询内部线性扫描单元，不存储空间索引。
 
 组装算子（`stiffness`、`body_force` 等）通过 `Variable` 接收"一组单元"，而无需关心调用方持有的是切片还是 `Vec`。库为 `&[T]` 与 `Vec<T>` 提供了 blanket impl，因此两种容器都能直接传入：
 
@@ -96,11 +103,12 @@ let k2 = stiffness(slice, ea);   // 同样合法
 ```rust
 pub trait FromGmsh<const D: usize>: Sized {
     const GMSH_ELEMENT_TYPE: i32;
-    fn from_gmsh(node_ids: &[usize], nodes: &HashMap<usize, Node<D>>) -> Option<Self>;
+    const GMSH_NODE_COUNT: usize;
+    fn from_gmsh(node_ids: &[usize], nodes: &NodeTable<D>) -> Result<Self, MeshError>;
 }
 ```
 
-单元类型实现 `FromGmsh<D>` 后，即可通过 `GmshMesh::elements` 按物理组名构造类型化单元向量。当前已支持 `Seg2`（类型号 1）、`Tri3`（类型号 2）、`Poi1`（类型号 15）。
+单元类型实现 `FromGmsh<D>` 后，即可通过 `GmshMesh::elements` 按物理组名构造类型化单元向量。当前已支持 `Seg2`（类型号 1）、`Tri3`（类型号 2）、`Quad4`（类型号 3）、`Poi1`（类型号 15）。
 
 ## 组装风格：`Triplet` 与 `Doublet`
 

@@ -18,7 +18,7 @@ use ansatz::element::seg2::Seg2;
 use ansatz::element::tri3::Tri3;
 use ansatz::element::{Element, FullIntegration};
 use ansatz::io::gmsh::{read_gmsh, FromGmsh};
-use ansatz::operation::heat::{conduction_stiffness, h1_semierror, l2_error, temperature_penalty};
+use ansatz::operation::heat::{conduction_stiffness, h1_semi_error, l2_error, temperature_penalty};
 use ansatz::sparse_vector::try_new_from_doublet;
 
 /// Runs a steady-state patch test on a mesh read from GMSH: assembles the
@@ -32,9 +32,9 @@ fn run_patch_test<T, const N: usize, const G: usize>(path: &str, label: &str)
 where
     T: FromGmsh<2> + Element<2, 2, N> + FullIntegration<2, G>,
 {
-    let mesh = read_gmsh::<2>(path);
-    let units: Vec<T> = mesh.elements("Ω");
-    let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ");
+    let mesh = read_gmsh::<2>(path).unwrap();
+    let units: Vec<T> = mesh.elements("Ω").unwrap();
+    let segs: Vec<Seg2<2>> = mesh.elements("Γᵍ").unwrap();
 
     let max_id = mesh.nodes.keys().copied().max().unwrap();
     let n_dofs = max_id + 1;
@@ -52,12 +52,12 @@ where
     doublets.extend(ptd);
 
     let kk = SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
-    let f = try_new_from_doublet(n_dofs, &doublets);
+    let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
     let llt = kk.sp_cholesky(Side::Lower).unwrap();
     let d = llt.solve(&f);
 
     let l2 = l2_error(&units, |id| d[id], &exact);
-    let h1 = h1_semierror(&units, |id| d[id], &exact_grad);
+    let h1 = h1_semi_error(&units, |id| d[id], &exact_grad);
 
     println!(
         "  {}: {} elements, L2 error: {:.3e}, H1 semi-norm error: {:.3e}",

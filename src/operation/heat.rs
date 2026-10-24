@@ -11,7 +11,9 @@
 //! `book/src/theory-heat.md` for the underlying theory.
 
 use crate::element::{Element, FullIntegration, IntegrationScheme};
-use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
+use crate::operation::{
+    node_coefficients, Doublets, Triplets, TripletsAndDoublets, Variable, VariableError,
+};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
 
@@ -25,14 +27,14 @@ use faer::sparse::Triplet;
 /// [`super::bar::stiffness`] only in the material coefficient (`k` replaces
 /// `ea`).
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 0, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn conduction_stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     k: f64,
 ) -> Triplets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
@@ -69,14 +71,14 @@ where
 /// length `L` this yields the consistent mass matrix
 /// `(ρ c_p L / 6) [[2, 1], [1, 2]]`.
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 0, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn capacity<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     rho_cp: f64,
 ) -> Triplets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let mut triplets: Triplets = Vec::with_capacity(N * (N + 1) / 2 * G);
@@ -119,7 +121,7 @@ pub fn heat_source<T, const D: usize, const P: usize, const N: usize, const G: u
     q: impl Fn([f64; D]) -> f64,
 ) -> Doublets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -148,10 +150,10 @@ where
 /// `qn` is the prescribed outward heat flux (W/m²); each boundary element
 /// contributes `Fᵢ += ∫ Nᵢ (−q_n) dΓ = Σ_g Nᵢ(ξ_g) (−q_n) |J| w_g` to the load
 /// vector. The minus sign follows from the convention `k ∂T/∂n = −q_n`, so this
-/// is the sign-flipped analogue of [`super::bar::traction`], generalized to
+/// is the sign-flipped analogue of [`super::bar::point_load`], generalized to
 /// arbitrary boundary dimension. Returns a list of [`Doublet`]s.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 1, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a concentrated flux.
 pub fn heat_flux<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -159,7 +161,7 @@ pub fn heat_flux<T, const D: usize, const P: usize, const N: usize, const G: usi
     qn: f64,
 ) -> Doublets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -191,7 +193,7 @@ where
 /// quadrature point). Returns a `(stiffness triplets, [`Doublet`] load terms)`
 /// pair.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 1, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a single-node constraint.
 pub fn temperature_penalty<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -200,7 +202,7 @@ pub fn temperature_penalty<T, const D: usize, const P: usize, const N: usize, co
     td: impl Fn([f64; D]) -> f64,
 ) -> TripletsAndDoublets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -244,7 +246,7 @@ where
 /// (Dirichlet) constraint whereas convection models a physical (natural-type)
 /// boundary flux.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, 0, P, N>`]); each
+/// `v` is a set of boundary elements (implementing [`Variable<D, 1, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a single-node term.
 pub fn convection<T, const D: usize, const P: usize, const N: usize, const G: usize>(
@@ -253,7 +255,7 @@ pub fn convection<T, const D: usize, const P: usize, const N: usize, const G: us
     t_inf: f64,
 ) -> TripletsAndDoublets
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -294,7 +296,7 @@ pub fn l2_error<T, const D: usize, const P: usize, const N: usize, const G: usiz
     u: impl Fn([f64; D]) -> f64,
 ) -> f64
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -322,13 +324,13 @@ where
 ///
 /// `u_h` maps a node id to its nodal value; `grad_u` maps physical coordinates
 /// to the exact gradient.
-pub fn h1_semierror<T, const D: usize, const P: usize, const N: usize, const G: usize>(
+pub fn h1_semi_error<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     u_h: impl Fn(usize) -> f64,
     grad_u: impl Fn([f64; D]) -> [f64; D],
 ) -> f64
 where
-    T: Variable<D, 0, P, N>,
+    T: Variable<D, 1, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -352,6 +354,53 @@ where
     sum.sqrt()
 }
 
+/// Physical temperature gradient at a known element and parametric point.
+///
+/// # Errors
+///
+/// Returns [`VariableError::CoefficientOutOfRange`] if the nodal temperature
+/// vector is too short for a referenced node.
+pub fn gradient<T, const D: usize, const P: usize, const N: usize>(
+    elm: &T,
+    xi: [f64; P],
+    temperature: &[f64],
+) -> Result<[f64; D], VariableError>
+where
+    T: Element<D, P, N>,
+{
+    let dshape = elm.derivative_shape(xi);
+    let node_ids = elm.id();
+    let mut grad = [0.0_f64; D];
+
+    for a in 0..N {
+        let value = node_coefficients(temperature, node_ids[a], 1)?[0];
+        for (i, component) in grad.iter_mut().enumerate() {
+            *component += dshape[a][i] * value;
+        }
+    }
+
+    Ok(grad)
+}
+
+/// Heat flux `q = -k ∇T` at a known element and parametric point.
+///
+/// # Errors
+///
+/// Returns [`VariableError::CoefficientOutOfRange`] if the nodal temperature
+/// vector is too short for a referenced node.
+pub fn flux<T, const D: usize, const P: usize, const N: usize>(
+    elm: &T,
+    xi: [f64; P],
+    temperature: &[f64],
+    conductivity: f64,
+) -> Result<[f64; D], VariableError>
+where
+    T: Element<D, P, N>,
+{
+    let grad = gradient(elm, xi, temperature)?;
+    Ok(std::array::from_fn(|i| -conductivity * grad[i]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,9 +408,9 @@ mod tests {
     use crate::element::seg2::Seg2;
     use crate::node::Node;
     use crate::sparse_vector::try_new_from_doublet;
-    use faer::Side;
     use faer::prelude::*;
     use faer::sparse::SparseColMat;
+    use faer::Side;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-5
@@ -435,7 +484,7 @@ mod tests {
         doublets.extend(pd2);
 
         let kk = SparseColMat::<usize, f64>::try_new_from_triplets(3, 3, &triplets).unwrap();
-        let f = try_new_from_doublet(3, &doublets);
+        let f = try_new_from_doublet(3, &doublets).unwrap();
         let llt = kk.sp_cholesky(Side::Lower).unwrap();
         let d = llt.solve(&f);
 
@@ -467,7 +516,7 @@ mod tests {
         doublets.extend(heat_source(&bars, |_| 1.0));
 
         let kk = SparseColMat::<usize, f64>::try_new_from_triplets(3, 3, &triplets).unwrap();
-        let f = try_new_from_doublet(3, &doublets);
+        let f = try_new_from_doublet(3, &doublets).unwrap();
         let llt = kk.sp_cholesky(Side::Lower).unwrap();
         let d = llt.solve(&f);
 
@@ -493,7 +542,7 @@ mod tests {
         doublets.extend(heat_flux(&vec![right], -1.0));
 
         let kk = SparseColMat::<usize, f64>::try_new_from_triplets(2, 2, &triplets).unwrap();
-        let f = try_new_from_doublet(2, &doublets);
+        let f = try_new_from_doublet(2, &doublets).unwrap();
         let llt = kk.sp_cholesky(Side::Lower).unwrap();
         let d = llt.solve(&f);
 
@@ -521,7 +570,7 @@ mod tests {
         doublets.extend(cd);
 
         let kk = SparseColMat::<usize, f64>::try_new_from_triplets(2, 2, &triplets).unwrap();
-        let f = try_new_from_doublet(2, &doublets);
+        let f = try_new_from_doublet(2, &doublets).unwrap();
         let llt = kk.sp_cholesky(Side::Lower).unwrap();
         let d = llt.solve(&f);
 
@@ -682,8 +731,18 @@ mod tests {
         let bars: Vec<Seg2<1>> = vec![Seg2::new(Node::new(0, [0.0]), Node::new(1, [4.0]))];
         let uh = |_id: usize| 0.0;
         let l2 = l2_error(&bars, uh, |x: [f64; 1]| x[0]);
-        let h1 = h1_semierror(&bars, uh, |_: [f64; 1]| [1.0]);
+        let h1 = h1_semi_error(&bars, uh, |_: [f64; 1]| [1.0]);
         assert!(close(l2, (64.0_f64 / 3.0).sqrt()));
         assert!(close(h1, 2.0));
+    }
+
+    #[test]
+    fn gradient_and_flux_of_linear_temperature() {
+        let bars = [Seg2::new(Node::new(0, [0.0]), Node::new(1, [2.0]))];
+        let temperature = [0.0, 2.0]; // T = x
+        let grad = gradient(&bars[0], [0.0], &temperature).unwrap();
+        assert_eq!(grad, [1.0]);
+        let q = flux(&bars[0], [0.0], &temperature, 3.0).unwrap();
+        assert_eq!(q, [-3.0]);
     }
 }

@@ -9,8 +9,10 @@
 # Body force, prescribed displacement, and prescribed traction are functions
 # of the physical coordinates `x`, `y`. Each component of `value` is either a
 # number (a constant) or a string expression, e.g. `"sin(pi * x) * cos(pi * y)"`.
-# Supported operators/functions: + - * / ^, parentheses, pi, e,
-# sin, cos, tan, exp, ln, sqrt, abs, sinh, cosh.
+# Expressions use fasteval syntax (operators + - * / ^, parentheses, comparisons,
+# built-ins such as sin, cos, tan, abs, sinh, cosh, min, max). In addition,
+# `sqrt`, `exp`, and `ln` are available, and `pi` / `e` may be written bare
+# (as in the examples below) or as `pi()` / `e()`.
 
 [problem]
 type = "plane_stress"   # plane_stress | plane_strain

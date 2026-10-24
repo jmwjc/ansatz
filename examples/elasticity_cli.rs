@@ -19,8 +19,10 @@
 //! Body force, traction, and prescribed displacement are specified as
 //! **functions of the physical coordinates `x`, `y`**: each component of a
 //! `value` array is either a number or a string expression such as
-//! `"sin(pi * x) * cos(pi * y)"`. The supported syntax is documented in the
-//! `expr` module below.
+//! `"sin(pi * x) * cos(pi * y)"`, written in [`fasteval`] syntax. On top of
+//! fasteval's operators (`+ - * / ^`, comparisons, ...) and built-ins, the
+//! bare constants `pi` and `e` as well as the functions `sqrt`, `exp`, and
+//! `ln` are also accepted.
 //!
 //! The interior element type is chosen at run time from the GMSH element type
 //! stored in the `Ω` physical group: `Tri3` (type 2) or `Quad4` (type 3).
@@ -38,7 +40,7 @@ use ansatz::element::tri3::Tri3;
 use ansatz::element::{Element, FullIntegration};
 use ansatz::io::gmsh::{FromGmsh, GmshMesh, read_gmsh};
 use ansatz::operation::elasticity::{
-    body_force, displacement_penalty, lame_constants, plane_stress_lambda, stiffness, traction,
+    Lame, body_force, displacement_penalty, stiffness, traction,
 };
 use ansatz::sparse_vector::try_new_from_doublet;
 
@@ -50,321 +52,56 @@ const ESSENTIAL: &str = "Γᵍ";
 const NATURAL: &str = "Γᵗ";
 
 // ---------------------------------------------------------------------------
-// Tiny scalar expression parser for `x`, `y`
+// Scalar expressions in `x` and `y`
 // ---------------------------------------------------------------------------
 
 mod expr {
-    use std::iter::Peekable;
-    use std::str::Chars;
+    use fasteval::{Compiler, Evaler, Instruction, Parser, Slab};
 
-    /// A parsed scalar expression in the two variables `x` and `y`.
-    #[derive(Clone, Debug)]
-    pub struct Expr(ExprKind);
-
-    #[derive(Clone, Debug)]
-    enum ExprKind {
-        Num(f64),
-        Var(char),
-        Neg(Box<ExprKind>),
-        Add(Box<ExprKind>, Box<ExprKind>),
-        Sub(Box<ExprKind>, Box<ExprKind>),
-        Mul(Box<ExprKind>, Box<ExprKind>),
-        Div(Box<ExprKind>, Box<ExprKind>),
-        Pow(Box<ExprKind>, Box<ExprKind>),
-        Func(&'static str, Box<ExprKind>),
-    }
-
-    #[derive(Clone, Debug, PartialEq)]
-    enum Token {
-        Num(f64),
-        Ident(String),
-        Plus,
-        Minus,
-        Star,
-        Slash,
-        Caret,
-        LParen,
-        RParen,
+    /// A compiled scalar expression in the two variables `x` and `y`.
+    pub struct Expr {
+        slab: Slab,
+        instr: Instruction,
     }
 
     impl Expr {
         /// A constant expression.
         pub fn constant(value: f64) -> Expr {
-            Expr(ExprKind::Num(value))
+            Expr {
+                slab: Slab::new(),
+                instr: Instruction::IConst(value),
+            }
         }
 
-        /// Parses an expression in `x` and `y`.
+        /// Parses and compiles an expression in `x` and `y`.
         ///
-        /// Supported syntax: `+ - * / ^`, parentheses, the constants `pi` and
-        /// `e`, and the functions `sin`, `cos`, `tan`, `exp`, `ln`, `sqrt`,
-        /// `abs`, `sinh`, `cosh`.
-        pub fn parse(src: &str) -> Expr {
-            parse_expr(src)
+        /// All of fasteval's operators and built-in functions are available.
+        /// In addition, `pi` and `e` may be used without parentheses and
+        /// `sqrt`, `exp`, and `ln` are provided as functions.
+        pub fn parse(src: &str) -> Result<Expr, fasteval::Error> {
+            let mut slab = Slab::new();
+            let parsed = Parser::new().parse(src, &mut slab.ps)?.from(&slab.ps);
+            let instr = parsed.compile(&slab.ps, &mut slab.cs);
+            Ok(Expr { slab, instr })
         }
 
         /// Evaluates the expression at the physical point `(x, y)`.
-        pub fn eval(&self, x: f64, y: f64) -> f64 {
-            self.0.eval(x, y)
-        }
-    }
-
-    impl ExprKind {
-        fn eval(&self, x: f64, y: f64) -> f64 {
-            match self {
-                ExprKind::Num(value) => *value,
-                ExprKind::Var('x') => x,
-                ExprKind::Var('y') => y,
-                ExprKind::Var(other) => panic!("unknown variable: {other}"),
-                ExprKind::Neg(a) => -a.eval(x, y),
-                ExprKind::Add(a, b) => a.eval(x, y) + b.eval(x, y),
-                ExprKind::Sub(a, b) => a.eval(x, y) - b.eval(x, y),
-                ExprKind::Mul(a, b) => a.eval(x, y) * b.eval(x, y),
-                ExprKind::Div(a, b) => a.eval(x, y) / b.eval(x, y),
-                ExprKind::Pow(a, b) => a.eval(x, y).powf(b.eval(x, y)),
-                ExprKind::Func(name, a) => {
-                    let value = a.eval(x, y);
-                    match *name {
-                        "sin" => value.sin(),
-                        "cos" => value.cos(),
-                        "tan" => value.tan(),
-                        "exp" => value.exp(),
-                        "ln" => value.ln(),
-                        "sqrt" => value.sqrt(),
-                        "abs" => value.abs(),
-                        "sinh" => value.sinh(),
-                        "cosh" => value.cosh(),
-                        _ => unreachable!(),
-                    }
+        pub fn eval(&self, [x, y]: [f64; 2]) -> f64 {
+            let mut namespace = |name: &str, args: Vec<f64>| -> Option<f64> {
+                match name {
+                    "x" => Some(x),
+                    "y" => Some(y),
+                    "pi" => Some(std::f64::consts::PI),
+                    "e" => Some(std::f64::consts::E),
+                    "sqrt" => args.first().copied().map(f64::sqrt),
+                    "exp" => args.first().copied().map(f64::exp),
+                    "ln" => args.first().copied().map(f64::ln),
+                    _ => None,
                 }
-            }
-        }
-    }
-
-    fn parse_expr(src: &str) -> Expr {
-        let tokens = lex(src);
-        assert!(!tokens.is_empty(), "empty expression");
-        let mut parser = Parser { tokens, pos: 0 };
-        let node = parser.parse_add();
-        assert!(parser.peek().is_none(), "unexpected trailing token");
-        Expr(node)
-    }
-
-    fn lex(src: &str) -> Vec<Token> {
-        let mut chars = src.chars().peekable();
-        let mut tokens = Vec::new();
-        while let Some(&c) = chars.peek() {
-            if c.is_whitespace() {
-                chars.next();
-                continue;
-            }
-            match c {
-                '+' => {
-                    tokens.push(Token::Plus);
-                    chars.next();
-                }
-                '-' => {
-                    tokens.push(Token::Minus);
-                    chars.next();
-                }
-                '*' => {
-                    tokens.push(Token::Star);
-                    chars.next();
-                }
-                '/' => {
-                    tokens.push(Token::Slash);
-                    chars.next();
-                }
-                '^' => {
-                    tokens.push(Token::Caret);
-                    chars.next();
-                }
-                '(' => {
-                    tokens.push(Token::LParen);
-                    chars.next();
-                }
-                ')' => {
-                    tokens.push(Token::RParen);
-                    chars.next();
-                }
-                '0'..='9' | '.' => {
-                    tokens.push(Token::Num(lex_number(&mut chars)));
-                }
-                'a'..='z' | 'A'..='Z' | '_' => {
-                    let mut ident = String::new();
-                    while let Some(&c) = chars.peek() {
-                        if c.is_alphanumeric() || c == '_' {
-                            ident.push(c);
-                            chars.next();
-                        } else {
-                            break;
-                        }
-                    }
-                    tokens.push(Token::Ident(ident));
-                }
-                other => panic!("unexpected character in expression: {other}"),
-            }
-        }
-        tokens
-    }
-
-    fn lex_number(chars: &mut Peekable<Chars<'_>>) -> f64 {
-        let mut text = String::new();
-        while let Some(&c) = chars.peek() {
-            if c.is_ascii_digit() || c == '.' {
-                text.push(c);
-                chars.next();
-            } else {
-                break;
-            }
-        }
-        if let Some(&c) = chars.peek() {
-            if c == 'e' || c == 'E' {
-                text.push(c);
-                chars.next();
-                if let Some(&c) = chars.peek() {
-                    if c == '+' || c == '-' {
-                        text.push(c);
-                        chars.next();
-                    }
-                }
-                while let Some(&c) = chars.peek() {
-                    if c.is_ascii_digit() {
-                        text.push(c);
-                        chars.next();
-                    } else {
-                        break;
-                    }
-                }
-            }
-        }
-        text.parse().unwrap_or_else(|_| panic!("invalid number: {text}"))
-    }
-
-    struct Parser {
-        tokens: Vec<Token>,
-        pos: usize,
-    }
-
-    impl Parser {
-        fn peek(&self) -> Option<&Token> {
-            self.tokens.get(self.pos)
-        }
-
-        fn bump(&mut self) -> Token {
-            let token = self.tokens[self.pos].clone();
-            self.pos += 1;
-            token
-        }
-
-        fn eat(&mut self, token: Token) -> bool {
-            if self.peek() == Some(&token) {
-                self.bump();
-                true
-            } else {
-                false
-            }
-        }
-
-        fn parse_add(&mut self) -> ExprKind {
-            let mut lhs = self.parse_mul();
-            while let Some(tok) = self.peek() {
-                match tok {
-                    Token::Plus => {
-                        self.bump();
-                        let rhs = self.parse_mul();
-                        lhs = ExprKind::Add(Box::new(lhs), Box::new(rhs));
-                    }
-                    Token::Minus => {
-                        self.bump();
-                        let rhs = self.parse_mul();
-                        lhs = ExprKind::Sub(Box::new(lhs), Box::new(rhs));
-                    }
-                    _ => break,
-                }
-            }
-            lhs
-        }
-
-        fn parse_mul(&mut self) -> ExprKind {
-            let mut lhs = self.parse_unary();
-            while let Some(tok) = self.peek() {
-                match tok {
-                    Token::Star => {
-                        self.bump();
-                        let rhs = self.parse_unary();
-                        lhs = ExprKind::Mul(Box::new(lhs), Box::new(rhs));
-                    }
-                    Token::Slash => {
-                        self.bump();
-                        let rhs = self.parse_unary();
-                        lhs = ExprKind::Div(Box::new(lhs), Box::new(rhs));
-                    }
-                    _ => break,
-                }
-            }
-            lhs
-        }
-
-        fn parse_unary(&mut self) -> ExprKind {
-            match self.peek() {
-                Some(Token::Plus) => {
-                    self.bump();
-                    self.parse_unary()
-                }
-                Some(Token::Minus) => {
-                    self.bump();
-                    ExprKind::Neg(Box::new(self.parse_unary()))
-                }
-                _ => self.parse_power(),
-            }
-        }
-
-        fn parse_power(&mut self) -> ExprKind {
-            let base = self.parse_primary();
-            if self.eat(Token::Caret) {
-                let exponent = self.parse_unary();
-                ExprKind::Pow(Box::new(base), Box::new(exponent))
-            } else {
-                base
-            }
-        }
-
-        fn parse_primary(&mut self) -> ExprKind {
-            match self.bump() {
-                Token::Num(value) => ExprKind::Num(value),
-                Token::Ident(name) => match name.as_str() {
-                    "x" => ExprKind::Var('x'),
-                    "y" => ExprKind::Var('y'),
-                    "pi" => ExprKind::Num(std::f64::consts::PI),
-                    "e" => ExprKind::Num(std::f64::consts::E),
-                    "sin" | "cos" | "tan" | "exp" | "ln" | "sqrt" | "abs" | "sinh"
-                    | "cosh" => {
-                        assert!(self.eat(Token::LParen), "expected '(' after {name}");
-                        let arg = self.parse_add();
-                        assert!(self.eat(Token::RParen), "expected ')' after {name}");
-                        let func: &'static str = match name.as_str() {
-                            "sin" => "sin",
-                            "cos" => "cos",
-                            "tan" => "tan",
-                            "exp" => "exp",
-                            "ln" => "ln",
-                            "sqrt" => "sqrt",
-                            "abs" => "abs",
-                            "sinh" => "sinh",
-                            "cosh" => "cosh",
-                            _ => unreachable!(),
-                        };
-                        ExprKind::Func(func, Box::new(arg))
-                    }
-                    other => panic!("unknown identifier: {other}"),
-                },
-                Token::LParen => {
-                    let expr = self.parse_add();
-                    assert!(self.eat(Token::RParen), "expected ')'");
-                    expr
-                }
-                other => panic!("unexpected token: {other:?}"),
-            }
+            };
+            self.instr
+                .eval(&self.slab, &mut namespace)
+                .unwrap_or_else(|err| panic!("cannot evaluate expression: {err}"))
         }
     }
 }
@@ -374,14 +111,16 @@ mod expr {
 // ---------------------------------------------------------------------------
 
 mod config {
-    use toml::Value;
+    use serde::Deserialize;
 
     use super::expr::Expr;
 
     /// Plane-stress / plane-strain material model selector.
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default, Deserialize)]
+    #[serde(rename_all = "snake_case")]
     pub enum ProblemType {
         PlaneStress,
+        #[default]
         PlaneStrain,
     }
 
@@ -394,136 +133,103 @@ mod config {
         }
     }
 
-    /// A two-component field (displacement, traction, or body force) whose
-    /// entries are scalar expressions in the physical coordinates `x`, `y`.
-    #[derive(Clone)]
-    pub struct Field {
-        components: Vec<Expr>,
+    /// One component of a field: either a number or an expression string.
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Component {
+        Number(f64),
+        Expression(String),
     }
 
-    impl Field {
-        pub fn eval(&self, p: [f64; 2]) -> [f64; 2] {
-            [
-                self.components[0].eval(p[0], p[1]),
-                self.components[1].eval(p[0], p[1]),
-            ]
+    impl Component {
+        fn compile(&self) -> Expr {
+            match self {
+                Self::Number(value) => Expr::constant(*value),
+                Self::Expression(src) => Expr::parse(src)
+                    .unwrap_or_else(|err| panic!("invalid expression `{src}`: {err}")),
+            }
         }
     }
 
-    /// Problem configuration read from the TOML file.
-    pub struct Config {
-        pub problem_type: ProblemType,
-        pub young: f64,
-        pub poisson: f64,
-        pub body_force: Option<Field>,
-        pub essential: Option<Field>,
-        pub natural: Option<Field>,
+    /// A two-component field (displacement, traction, or body force) whose
+    /// entries are scalar expressions in the physical coordinates `x`, `y`.
+    #[derive(Deserialize)]
+    #[serde(from = "RawField")]
+    pub struct Field([Expr; 2]);
+
+    impl Field {
+        pub fn eval(&self, point: [f64; 2]) -> [f64; 2] {
+            [self.0[0].eval(point), self.0[1].eval(point)]
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct RawField {
+        value: [Component; 2],
+    }
+
+    impl From<RawField> for Field {
+        fn from(raw: RawField) -> Self {
+            let [first, second] = raw.value;
+            Self([first.compile(), second.compile()])
+        }
+    }
+
+    /// The `[essential]` table: prescribed displacement plus penalty factor.
+    #[derive(Deserialize)]
+    #[serde(from = "RawEssential")]
+    pub struct Essential {
+        pub prescribed: Field,
         pub penalty: f64,
     }
 
-    fn table<'a>(root: &'a Value, name: &str) -> &'a toml::Table {
-        root.get(name)
-            .and_then(Value::as_table)
-            .unwrap_or_else(|| panic!("missing [{name}] table"))
+    #[derive(Deserialize)]
+    struct RawEssential {
+        value: [Component; 2],
+        #[serde(default = "default_penalty")]
+        penalty: f64,
     }
 
-    fn optional_table<'a>(root: &'a Value, name: &str) -> Option<&'a toml::Table> {
-        root.get(name).and_then(Value::as_table)
-    }
-
-    fn float(value: &Value, what: &str) -> f64 {
-        value
-            .as_float()
-            .unwrap_or_else(|| panic!("{what} must be a float"))
-    }
-
-    fn component(value: &Value, what: &str) -> Expr {
-        if let Some(number) = value.as_float() {
-            Expr::constant(number)
-        } else if let Some(number) = value.as_integer() {
-            Expr::constant(number as f64)
-        } else if let Some(expression) = value.as_str() {
-            Expr::parse(expression)
-        } else {
-            panic!("{what} must be a number or a string expression in x, y")
-        }
-    }
-
-    fn field(value: &Value, what: &str) -> Field {
-        let array = value
-            .as_array()
-            .unwrap_or_else(|| panic!("{what} must be an array of two components"));
-        assert_eq!(array.len(), 2, "{what} must have exactly two components");
-        Field {
-            components: array
-                .iter()
-                .map(|entry| component(entry, what))
-                .collect(),
-        }
-    }
-
-    pub fn parse(text: &str) -> Config {
-        let root: Value = toml::from_str(text).expect("invalid TOML");
-
-        let problem = table(&root, "problem");
-        let problem_type = match problem
-            .get("type")
-            .and_then(Value::as_str)
-            .unwrap_or("plane_strain")
-        {
-            "plane_stress" => ProblemType::PlaneStress,
-            "plane_strain" => ProblemType::PlaneStrain,
-            other => panic!("unknown problem.type: {other}"),
-        };
-
-        let material = table(&root, "material");
-        let young = float(
-            material.get("young").expect("missing material.young"),
-            "material.young",
-        );
-        let poisson = float(
-            material.get("poisson").expect("missing material.poisson"),
-            "material.poisson",
-        );
-
-        let body_force = optional_table(&root, "body_force").map(|section| {
-            field(
-                section.get("value").expect("missing body_force.value"),
-                "body_force.value",
-            )
-        });
-
-        let (essential, penalty) = match optional_table(&root, "essential") {
-            Some(section) => {
-                let value = field(
-                    section.get("value").expect("missing essential.value"),
-                    "essential.value",
-                );
-                let penalty = section
-                    .get("penalty")
-                    .and_then(Value::as_float)
-                    .unwrap_or(1e7);
-                (Some(value), penalty)
+    impl From<RawEssential> for Essential {
+        fn from(raw: RawEssential) -> Self {
+            Self {
+                prescribed: Field::from(RawField { value: raw.value }),
+                penalty: raw.penalty,
             }
-            None => (None, 1e7),
-        };
-
-        let natural = optional_table(&root, "natural").map(|section| {
-            field(
-                section.get("value").expect("missing natural.value"),
-                "natural.value",
-            )
-        });
-
-        Config {
-            problem_type,
-            young,
-            poisson,
-            body_force,
-            essential,
-            natural,
-            penalty,
         }
+    }
+
+    fn default_penalty() -> f64 {
+        1e7
+    }
+
+    /// Problem configuration read from the TOML file.
+    #[derive(Deserialize)]
+    pub struct Config {
+        #[serde(default)]
+        pub problem: Problem,
+        pub material: Material,
+        pub body_force: Option<Field>,
+        pub essential: Option<Essential>,
+        pub natural: Option<Field>,
+    }
+
+    impl Config {
+        pub fn parse(text: &str) -> Config {
+            toml::from_str(text).unwrap_or_else(|err| panic!("invalid configuration: {err}"))
+        }
+    }
+
+    #[derive(Default, Deserialize)]
+    pub struct Problem {
+        #[serde(rename = "type", default)]
+        pub kind: ProblemType,
+    }
+
+    #[derive(Deserialize)]
+    pub struct Material {
+        pub young: f64,
+        pub poisson: f64,
     }
 }
 
@@ -537,7 +243,7 @@ use config::{Config, ProblemType};
 /// no such physical group.
 fn optional_elements<T: FromGmsh<2>>(mesh: &GmshMesh<2>, name: &str) -> Option<Vec<T>> {
     if mesh.physical_names.values().any(|n| n == name) {
-        Some(mesh.elements(name))
+        Some(mesh.elements(name).unwrap())
     } else {
         None
     }
@@ -556,39 +262,37 @@ where
     let max_id = mesh.nodes.keys().copied().max().unwrap();
     let n_dofs = (max_id + 1) * 2;
 
-    let (lambda, mu) = match cfg.problem_type {
-        ProblemType::PlaneStress => {
-            let lambda = plane_stress_lambda(cfg.young, cfg.poisson);
-            let (_, mu) = lame_constants(cfg.young, cfg.poisson);
-            (lambda, mu)
-        }
-        ProblemType::PlaneStrain => lame_constants(cfg.young, cfg.poisson),
+    let (young, poisson) = (cfg.material.young, cfg.material.poisson);
+    let lame = match cfg.problem.kind {
+        ProblemType::PlaneStress => Lame::plane_stress(young, poisson),
+        ProblemType::PlaneStrain => Lame::plane_strain(young, poisson),
     };
+    let (lambda, mu) = (lame.lambda, lame.mu);
 
     let mut triplets = stiffness(&units, lambda, mu);
     let mut doublets = Vec::new();
 
     if let Some(field) = &cfg.body_force {
-        let field = field.clone();
-        doublets.extend(body_force(&units, move |x| field.eval(x)));
+        doublets.extend(body_force(&units, |x| field.eval(x)));
     }
 
-    if let (Some(elems), Some(field)) =
-        (optional_elements::<Seg2<2>>(mesh, ESSENTIAL), &cfg.essential)
-    {
-        let field = field.clone();
-        let (pt, pd) = displacement_penalty(&elems, cfg.penalty, move |x| field.eval(x));
+    if let (Some(elems), Some(essential)) = (
+        optional_elements::<Seg2<2>>(mesh, ESSENTIAL),
+        &cfg.essential,
+    ) {
+        let (pt, pd) =
+            displacement_penalty(&elems, essential.penalty, |x| essential.prescribed.eval(x));
         triplets.extend(pt);
         doublets.extend(pd);
     }
 
-    if let (Some(elems), Some(field)) = (optional_elements::<Seg2<2>>(mesh, NATURAL), &cfg.natural) {
-        let field = field.clone();
-        doublets.extend(traction(&elems, move |x| field.eval(x)));
+    if let (Some(elems), Some(field)) = (optional_elements::<Seg2<2>>(mesh, NATURAL), &cfg.natural)
+    {
+        doublets.extend(traction(&elems, |x| field.eval(x)));
     }
 
     let k = SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
-    let f = try_new_from_doublet(n_dofs, &doublets);
+    let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
     k.sp_cholesky(Side::Lower).unwrap().solve(&f)
 }
 
@@ -602,25 +306,28 @@ fn main() {
     let msh_path = &args[2];
 
     let text = fs::read_to_string(toml_path).expect("cannot read TOML file");
-    let cfg = config::parse(&text);
-    let mesh = read_gmsh::<2>(msh_path);
+    let cfg = Config::parse(&text);
+    let mesh = read_gmsh::<2>(msh_path).unwrap();
 
     println!("== elasticity CLI ==");
     println!("  config: {toml_path}");
     println!("  mesh:   {msh_path}");
     println!("  nodes:  {}", mesh.nodes.len());
-    println!("  problem: {}", cfg.problem_type.label());
-    println!("  material: E = {}, nu = {}", cfg.young, cfg.poisson);
+    println!("  problem: {}", cfg.problem.kind.label());
+    println!(
+        "  material: E = {}, nu = {}",
+        cfg.material.young, cfg.material.poisson
+    );
 
-    let elem_type = mesh.element_type(INTERIOR);
+    let elem_type = mesh.element_type(INTERIOR).unwrap();
     let d = match elem_type {
         Tri3::<2>::GMSH_ELEMENT_TYPE => {
-            let units: Vec<Tri3<2>> = mesh.elements(INTERIOR);
+            let units: Vec<Tri3<2>> = mesh.elements(INTERIOR).unwrap();
             println!("  interior: {} Tri3 elements", units.len());
             solve::<Tri3<2>, 3, 3>(&mesh, units, &cfg)
         }
         Quad4::<2>::GMSH_ELEMENT_TYPE => {
-            let units: Vec<Quad4<2>> = mesh.elements(INTERIOR);
+            let units: Vec<Quad4<2>> = mesh.elements(INTERIOR).unwrap();
             println!("  interior: {} Quad4 elements", units.len());
             solve::<Quad4<2>, 4, 4>(&mesh, units, &cfg)
         }

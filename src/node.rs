@@ -1,4 +1,4 @@
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Node<const D: usize> {
     pub id: usize,
     pub coordinates: [f64; D],

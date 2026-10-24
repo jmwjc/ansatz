@@ -5,7 +5,7 @@
 //! force, the surface traction, and the prescribed-displacement penalty terms.
 //!
 //! The displacement field is vector-valued, so every operator is expressed over
-//! [`Variable<D, 1, P, N>`] (tensor order `O = 1`): node `a` owns `D` global
+//! [`Variable<D, D, P, N>`] (C = D displacement components): node `a` owns `D` global
 //! degrees of freedom `a·D + p` (`p = 0..D`).
 //!
 //! Following the tensor-notation convention of this crate, the physics inside
@@ -14,41 +14,51 @@
 //! `book/src/theory-elasticity.md` for the underlying theory.
 
 use crate::element::{Element, FullIntegration, IntegrationScheme, ReducedIntegration};
-use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
+use crate::operation::{
+    node_coefficients, Doublets, Triplets, TripletsAndDoublets, Variable, VariableError,
+};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
 
-/// Converts the engineering constants — Young's modulus `e` and Poisson's ratio
-/// `nu` — into the Lamé constants `(λ, μ)` of 3D / plane-strain isotropic
-/// linear elasticity:
-///
-/// `λ = Eν / ((1 + ν)(1 − 2ν))`, `μ = E / (2(1 + ν))`.
-pub fn lame_constants(e: f64, nu: f64) -> (f64, f64) {
-    let lambda = e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu));
-    let mu = e / (2.0 * (1.0 + nu));
-    (lambda, mu)
+/// Isotropic linear-elastic Lamé constants.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Lame {
+    pub lambda: f64,
+    pub mu: f64,
 }
 
-/// Effective first Lamé constant `λ* = Eν / (1 − ν²)` for plane stress.
-///
-/// In plane stress the out-of-plane stress is condensed out, which changes the
-/// in-plane volumetric coupling from `λ` to `λ*` while leaving the shear
-/// modulus `μ = E / (2(1 + ν))` unchanged. Pass this value as `lambda` to
-/// [`stiffness`] for plane-stress problems.
-pub fn plane_stress_lambda(e: f64, nu: f64) -> f64 {
-    e * nu / (1.0 - nu * nu)
-}
+impl Lame {
+    /// 3D / plane-strain Lamé constants from Young's modulus `e` and Poisson's
+    /// ratio `nu`: `λ = Eν / ((1 + ν)(1 − 2ν))`, `μ = E / (2(1 + ν))`.
+    pub fn from_engineering(e: f64, nu: f64) -> Self {
+        Self {
+            lambda: e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu)),
+            mu: e / (2.0 * (1.0 + nu)),
+        }
+    }
 
-/// Bulk modulus in `D` spatial dimensions: `K = λ + 2μ/D`.
-///
-/// For `D = 3` this is the standard `K = λ + 2μ/3`; for 2D plane strain it is
-/// `K = λ + μ`. It is the coefficient of the **dilatational** part of the
-/// isotropic bilinear form (see [`dilatational_stiffness`]); together with the
-/// shear modulus `μ` it gives the volumetric/deviatoric split
-/// `C = K I⊗I + 2μ (I − I⊗I/D)`.
-///
-pub fn bulk_modulus<const D: usize>(lambda: f64, mu: f64) -> f64 {
-    lambda + 2.0 * mu / D as f64
+    /// 3D Lamé constants.
+    pub fn three_dimensional(e: f64, nu: f64) -> Self {
+        Self::from_engineering(e, nu)
+    }
+
+    /// Plane-strain Lamé constants (same in-plane constants as 3D).
+    pub fn plane_strain(e: f64, nu: f64) -> Self {
+        Self::from_engineering(e, nu)
+    }
+
+    /// Plane-stress effective constants: `λ* = Eν / (1 − ν²)`, `μ` unchanged.
+    pub fn plane_stress(e: f64, nu: f64) -> Self {
+        Self {
+            lambda: e * nu / (1.0 - nu * nu),
+            mu: e / (2.0 * (1.0 + nu)),
+        }
+    }
+
+    /// Bulk modulus in `D` spatial dimensions: `K = λ + 2μ/D`.
+    pub fn bulk_modulus<const D: usize>(&self) -> f64 {
+        self.lambda + 2.0 * self.mu / D as f64
+    }
 }
 
 /// Assembles the linear-elastic stiffness matrix and returns sparse triplets for
@@ -65,16 +75,16 @@ pub fn bulk_modulus<const D: usize>(lambda: f64, mu: f64) -> f64 {
 /// isotropic form `ε(u) : C : ε(v) = λ (∇·u)(∇·v) + μ (∇u:∇v + ∇u:∇vᵀ)` in
 /// components, and holds for any spatial dimension `D` (2D plane strain, full
 /// 3D, and shell-like elements embedded in 3D). For plane stress, substitute
-/// [`plane_stress_lambda`] for `lambda`; `mu` is unchanged.
+/// [`Lame::plane_stress`] for `lambda`; `mu` is unchanged.
 ///
 /// This operator equals the sum of its volumetric and deviatoric parts,
 /// `stiffness(v, λ, μ) == dilatational_stiffness(v, K) + deviatoric_stiffness(v, μ)`
-/// with `K =` [`bulk_modulus::<D>`](bulk_modulus).
+/// with `K =` [`Lame::bulk_modulus::<D>`](Lame::bulk_modulus).
 ///
 /// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
 /// (`b ≤ a`), while off-diagonal blocks `(i, j)`, `j < i`, are emitted in full.
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each
+/// `v` is a set of elements (implementing [`Variable<D, D, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`].
 pub fn stiffness<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
@@ -82,7 +92,7 @@ pub fn stiffness<T, const D: usize, const P: usize, const N: usize, const G: usi
     mu: f64,
 ) -> Triplets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let nd = D * N; // DOFs per element (node-major: dof = a·D + p)
@@ -144,7 +154,7 @@ where
 /// `a_dil(u, v) = ∫ K (∇·u)(∇·v) dΩ`
 ///
 /// is the dilatational part, with `K = λ + 2μ/D` the bulk modulus
-/// (see [`bulk_modulus`]). In components, with `u = Nᵢ eₐ` and `v = Nⱼ e_b`,
+/// (see [`Lame::bulk_modulus`]). In components, with `u = Nᵢ eₐ` and `v = Nⱼ e_b`,
 ///
 /// `K_{(i,a),(j,b)} = ∫ K (∂ₐNᵢ)(∂_b Nⱼ) dΩ`,
 ///
@@ -163,7 +173,7 @@ where
 /// integration by design.
 ///
 /// `bulk` is the bulk modulus `K`. `v` is a set of elements (implementing
-/// [`Variable<D, 1, P, N>`]); each element must implement
+/// [`Variable<D, D, P, N>`]); each element must implement
 /// [`ReducedIntegration<P, G>`].
 ///
 /// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
@@ -173,7 +183,7 @@ pub fn dilatational_stiffness<T, const D: usize, const P: usize, const N: usize,
     bulk: f64,
 ) -> Triplets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + ReducedIntegration<P, G>,
 {
     let nd = D * N; // DOFs per element (node-major: dof = a·D + p)
@@ -239,7 +249,7 @@ where
 /// `stiffness(v, λ, μ) == dilatational_stiffness(v, K) + deviatoric_stiffness(v, μ)`.
 ///
 /// `mu` is the shear modulus. `v` is a set of elements (implementing
-/// [`Variable<D, 1, P, N>`]); each element must implement
+/// [`Variable<D, D, P, N>`]); each element must implement
 /// [`FullIntegration<P, G>`].
 ///
 /// Diagonal node blocks `(i, i)` emit the lower triangle of their `D×D` block
@@ -249,7 +259,7 @@ pub fn deviatoric_stiffness<T, const D: usize, const P: usize, const N: usize, c
     mu: f64,
 ) -> Triplets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let nd = D * N; // DOFs per element (node-major: dof = a·D + p)
@@ -313,14 +323,14 @@ where
 /// Returns a list of [`Doublet`]s that the caller can merge into a load vector
 /// via [`crate::sparse_vector::try_new_from_doublet`].
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each
+/// `v` is a set of elements (implementing [`Variable<D, D, P, N>`]); each
 /// element must implement [`FullIntegration<P, G>`].
 pub fn body_force<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     f: impl Fn([f64; D]) -> [f64; D],
 ) -> Doublets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -352,21 +362,21 @@ where
 /// `t` maps physical coordinates to the traction vector `t̄(x) ∈ R^D` (force
 /// per unit surface). Each boundary element contributes
 /// `F_{a,p} = ∫ Nₐ t̄_p dΓ = Σ_g Nₐ(ξ_g) t̄_p(x_g) |J| w_g`. This is the
-/// vector-valued analogue of [`super::bar::traction`], generalized to arbitrary
+/// vector-valued analogue of [`super::bar::point_load`], generalized to arbitrary
 /// boundary dimension; for a point element
 /// ([`crate::element::poi1::Poi1`]) it reduces to a concentrated force.
 ///
 /// Returns a list of [`Doublet`]s that the caller can merge into a load vector
 /// via [`crate::sparse_vector::try_new_from_doublet`].
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, 1, P, N>`]);
+/// `v` is a set of boundary elements (implementing [`Variable<D, D, P, N>`]);
 /// each element must implement [`FullIntegration<P, G>`].
 pub fn traction<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
     t: impl Fn([f64; D]) -> [f64; D],
 ) -> Doublets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -405,7 +415,7 @@ where
 /// at each quadrature point). Returns a `(stiffness triplets, [`Doublet`] load
 /// terms)` pair.
 ///
-/// `v` is a set of boundary elements (implementing [`Variable<D, 1, P, N>`]);
+/// `v` is a set of boundary elements (implementing [`Variable<D, D, P, N>`]);
 /// each element must implement [`FullIntegration<P, G>`]. For a point element
 /// ([`crate::element::poi1::Poi1`]) this reduces to a single-node vector
 /// constraint.
@@ -415,7 +425,7 @@ pub fn displacement_penalty<T, const D: usize, const P: usize, const N: usize, c
     u: impl Fn([f64; D]) -> [f64; D],
 ) -> TripletsAndDoublets
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -464,7 +474,7 @@ where
 /// `u` maps physical coordinates to the exact displacement vector. The pointwise
 /// difference uses the Euclidean norm `|·|` over the `D` components.
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, D, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn l2_error<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
@@ -472,7 +482,7 @@ pub fn l2_error<T, const D: usize, const P: usize, const N: usize, const G: usiz
     u: impl Fn([f64; D]) -> [f64; D],
 ) -> f64
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -511,10 +521,10 @@ where
 /// `Δ : C : Δ = λ (Δ_kk)² + 2μ (Δ_ij Δ_ij)`
 ///
 /// with `λ`, `μ` the Lamé constants, so the result is a genuine energy norm. For
-/// plane stress pass `plane_stress_lambda(E, ν)` as `lambda` (and leave `mu`
+/// plane stress pass `Lame::plane_stress(E, ν).lambda` as `lambda` (and leave `mu`
 /// unchanged), together with the in-plane exact strain components.
 ///
-/// `v` is a set of elements (implementing [`Variable<D, 1, P, N>`]); each element
+/// `v` is a set of elements (implementing [`Variable<D, D, P, N>`]); each element
 /// must implement [`FullIntegration<P, G>`].
 pub fn energy_error<T, const D: usize, const P: usize, const N: usize, const G: usize>(
     v: &T,
@@ -524,7 +534,7 @@ pub fn energy_error<T, const D: usize, const P: usize, const N: usize, const G: 
     mu: f64,
 ) -> f64
 where
-    T: Variable<D, 1, P, N>,
+    T: Variable<D, D, P, N>,
     T::Item: Element<D, P, N> + FullIntegration<P, G>,
 {
     let ξ = T::Item::points();
@@ -562,6 +572,71 @@ where
         }
     }
     sum.sqrt()
+}
+
+/// Strain tensor `ε = sym ∇u` at a known element and parametric point.
+///
+/// # Errors
+///
+/// Returns [`VariableError::CoefficientOutOfRange`] if the displacement vector
+/// is too short for a referenced node.
+pub fn strain<T, const D: usize, const P: usize, const N: usize>(
+    elm: &T,
+    xi: [f64; P],
+    displacement: &[f64],
+) -> Result<[[f64; D]; D], VariableError>
+where
+    T: Element<D, P, N>,
+{
+    let dshape = elm.derivative_shape(xi);
+    let node_ids = elm.id();
+    let mut epsilon = [[0.0_f64; D]; D];
+
+    for a in 0..N {
+        let coefficients_at_node = node_coefficients(displacement, node_ids[a], D)?;
+        for i in 0..D {
+            for j in 0..D {
+                epsilon[i][j] += 0.5
+                    * (dshape[a][j] * coefficients_at_node[i]
+                        + dshape[a][i] * coefficients_at_node[j]);
+            }
+        }
+    }
+
+    Ok(epsilon)
+}
+
+/// Isotropic stress `σ = λ tr(ε) I + 2μ ε` at a known element and point.
+///
+/// For plane stress pass [`Lame::plane_stress`] as `lambda`; for plane strain
+/// pass `Lame::plane_strain(E, ν).lambda`.
+///
+/// # Errors
+///
+/// Returns [`VariableError::CoefficientOutOfRange`] if the displacement vector
+/// is too short for a referenced node.
+pub fn stress<T, const D: usize, const P: usize, const N: usize>(
+    elm: &T,
+    xi: [f64; P],
+    displacement: &[f64],
+    lambda: f64,
+    mu: f64,
+) -> Result<[[f64; D]; D], VariableError>
+where
+    T: Element<D, P, N>,
+{
+    let epsilon = strain(elm, xi, displacement)?;
+    let trace: f64 = (0..D).map(|i| epsilon[i][i]).sum();
+
+    let mut sigma = [[0.0_f64; D]; D];
+    for i in 0..D {
+        for j in 0..D {
+            let delta = if i == j { 1.0 } else { 0.0 };
+            sigma[i][j] = lambda * trace * delta + 2.0 * mu * epsilon[i][j];
+        }
+    }
+
+    Ok(sigma)
 }
 
 #[cfg(test)]
@@ -642,7 +717,7 @@ mod tests {
         // vectors, which exercises every matrix entry.
         let tris = unit_triangle();
         let (lambda, mu) = (1.0, 2.0);
-        let bulk = bulk_modulus::<2>(lambda, mu);
+        let bulk = Lame { lambda, mu }.bulk_modulus::<2>();
 
         let iso = stiffness(&tris, lambda, mu);
         let mut split = dilatational_stiffness(&tris, bulk);
@@ -711,7 +786,7 @@ mod tests {
         // (the reference triangle has area 1/2).
         let tris = unit_triangle();
         let (lambda, mu) = (1.0, 2.0);
-        let bulk = bulk_modulus::<2>(lambda, mu);
+        let bulk = Lame { lambda, mu }.bulk_modulus::<2>();
         let alpha = 0.3;
         // Node-major DOFs: (u,v) at (0,0), (1,0), (0,1).
         let d = [0.0, 0.0, alpha, 0.0, 0.0, alpha];
@@ -732,7 +807,7 @@ mod tests {
         // Therefore a_dil(u, u) = 0 and a_dev(u, u) = ∫ 2μ (γ²/2) dΩ = μ γ²/2.
         let tris = unit_triangle();
         let (lambda, mu) = (1.0, 2.0);
-        let bulk = bulk_modulus::<2>(lambda, mu);
+        let bulk = Lame { lambda, mu }.bulk_modulus::<2>();
         let gamma = 0.4;
         // u = (γ y, 0): only the top-right node (0,1) has u_x = γ.
         let d = [0.0, 0.0, 0.0, 0.0, gamma, 0.0];
@@ -848,7 +923,7 @@ mod tests {
         let pts: Vec<Poi1<2>> = vec![Poi1::new(Node::new(5, [0.0, 0.0]))];
         let doublets = traction(&pts, |_| [3.0, 4.0]);
 
-        let f = try_new_from_doublet(12, &doublets);
+        let f = try_new_from_doublet(12, &doublets).unwrap();
         assert!(close(f[10], 3.0)); // node 5, component 0
         assert!(close(f[11], 4.0)); // node 5, component 1
     }
@@ -871,7 +946,7 @@ mod tests {
         // Node 3 owns DOFs 6 and 7 (id·D + p).
         assert_eq!(rows, vec![6, 7]);
 
-        let f = try_new_from_doublet(8, &doublets);
+        let f = try_new_from_doublet(8, &doublets).unwrap();
         assert!(close(f[6], alpha));
         assert!(close(f[7], 2.0 * alpha));
     }
@@ -881,10 +956,13 @@ mod tests {
         // For E = 200e9, ν = 0.3 the conversions must match the known formulas.
         let e = 200e9;
         let nu = 0.3;
-        let (lambda, mu) = lame_constants(e, nu);
-        assert!(close(lambda, e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))));
-        assert!(close(mu, e / (2.0 * (1.0 + nu))));
-        assert!(close(plane_stress_lambda(e, nu), e * nu / (1.0 - nu * nu)));
+        let lame = Lame::from_engineering(e, nu);
+        assert!(close(lame.lambda, e * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))));
+        assert!(close(lame.mu, e / (2.0 * (1.0 + nu))));
+
+        let plane_stress = Lame::plane_stress(e, nu);
+        assert!(close(plane_stress.lambda, e * nu / (1.0 - nu * nu)));
+        assert!(close(plane_stress.mu, lame.mu));
     }
 
     /// Unit right triangle (0,0), (1,0), (0,1), area 1/2, forming a single-
@@ -947,9 +1025,9 @@ mod tests {
         // `examples/cantilever.rs` and `book/src/example-cantilever-model.md`.
         use crate::element::quad4::Quad4;
         use crate::io::gmsh::read_gmsh;
-        use faer::Side;
         use faer::prelude::*;
         use faer::sparse::SparseColMat;
+        use faer::Side;
 
         const L: f64 = 8.0;
         const H: f64 = 1.0;
@@ -980,15 +1058,15 @@ mod tests {
             [0.0, P / (2.0 * i) * (H * H / 4.0 - y * y)]
         };
 
-        let mesh = read_gmsh::<2>("examples/msh/cantilever.msh");
-        let units: Vec<Quad4<2>> = mesh.elements("Ω");
-        let left: Vec<Seg2<2>> = mesh.elements("Γu");
-        let right: Vec<Seg2<2>> = mesh.elements("Γt");
+        let mesh = read_gmsh::<2>("examples/msh/cantilever.msh").unwrap();
+        let units: Vec<Quad4<2>> = mesh.elements("Ω").unwrap();
+        let left: Vec<Seg2<2>> = mesh.elements("Γu").unwrap();
+        let right: Vec<Seg2<2>> = mesh.elements("Γt").unwrap();
 
         let max_id = mesh.nodes.keys().copied().max().unwrap();
         let n_dofs = (max_id + 1) * 2;
-        let lambda = plane_stress_lambda(E, NU);
-        let (_, mu) = lame_constants(E, NU);
+        let lame = Lame::plane_stress(E, NU);
+        let (lambda, mu) = (lame.lambda, lame.mu);
 
         let mut triplets = stiffness(&units, lambda, mu);
         let (pt, mut doublets) = displacement_penalty(&left, 1e7, exact);
@@ -997,7 +1075,7 @@ mod tests {
 
         let k =
             SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
-        let f = try_new_from_doublet(n_dofs, &doublets);
+        let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
         let d = k.sp_cholesky(Side::Lower).unwrap().solve(&f);
 
         let l2 = l2_error(&units, |id, p| d[id * 2 + p], exact);
@@ -1008,5 +1086,21 @@ mod tests {
             energy < 2e-1,
             "cantilever energy error too large: {energy:e}"
         );
+    }
+
+    #[test]
+    fn strain_and_stress_of_linear_displacement() {
+        let tri = Tri3::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [1.0, 0.0]),
+            Node::new(2, [0.0, 1.0]),
+        );
+        // u = (x, 0): eps_xx = 1, all other components zero.
+        let u = [0.0, 0.0, 1.0, 0.0, 0.0, 0.0];
+        let eps = strain(&tri, [0.0, 0.0], &u).unwrap();
+        assert_eq!(eps, [[1.0, 0.0], [0.0, 0.0]]);
+
+        let sigma = stress(&tri, [0.0, 0.0], &u, 1.0, 2.0).unwrap();
+        assert_eq!(sigma, [[5.0, 0.0], [0.0, 1.0]]);
     }
 }

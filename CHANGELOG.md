@@ -9,6 +9,61 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-24
+
+### Breaking Changes
+
+- `io::gmsh::read_gmsh` 返回 `Result<GmshMesh<D>, MeshError>`，不再在解析失败时
+  `panic`/`expect`；
+- `GmshMesh::{element_type, elements, elements_by_tag}` 与
+  `FromGmsh::from_gmsh` 返回 `Result`；`FromGmsh` 新增 `GMSH_NODE_COUNT`，
+  `from_gmsh` 的节点参数由 `&HashMap` 改为 `&NodeTable`，
+  `elements` 会校验连通性长度，不再静默丢弃缺失节点的单元；
+- `sparse_vector::try_new_from_doublet` 返回
+  `Result<Col<f64>, DoubletError>`，越界索引不再触发 `panic`；
+- `Variable` 去掉张量阶 `O`，保留 `C`（每节点自由度数），签名变为
+  `Variable<D, C, P, N>`；`Variable` 不再表示张量，只表示一组单元上的多变量自由度；
+- `Variable::gradient` / `divergence` / `curl` 从 trait 移除，改由具体问题模块实现；
+  新增 `Variable::derivative_value`，返回 `Option<[[f64; C]; D]>`
+  （`derivative_value[i][k] = ∂u_k/∂x_i`）；`Variable::value` 返回
+  `Option<[f64; C]>`；
+- `Variable::{value, derivative_value}` 为物理点查询；点定位通过
+  `Variable::locate(x)` 线性扫描，不构建或存储空间索引；
+- `bar::traction` 改名为 `bar::point_load`，并支持多维载荷 `[f64; D]`；
+  `bar::displacement_penalty` 改名为 `bar::point_displacement_penalty`；
+- `heat::h1_semierror` 改名为 `heat::h1_semi_error`；
+- `elasticity::lame_constants` / `plane_stress_lambda` / `bulk_modulus`
+  被具名结构体 `elasticity::Lame` 替代：
+  `Lame::from_engineering` / `plane_stress` / `plane_strain` / `bulk_modulus`；
+- `Node` 增加 `Copy`/`Debug`/`PartialEq`；单元类型增加 `Clone`/`Debug`/`PartialEq`
+  和 `nodes()` / `node(index)` 访问器；`GmshMesh` 增加摘要式 `Debug`。
+
+### 新增
+
+- `io::gmsh::NodeTable<D>`：稠密节点坐标表（`id == index`），
+  `GmshMesh::node_table()` 与 `elements_by_tag_with_table` 支持多组复用同一张表；
+- `io::gmsh::PhysicalGroup<'a>` 与 `GmshMesh::physical_groups` /
+  `physical_group` / `physical_group_by_name` / `physical_names` /
+  `has_physical_group`；解析 `$PhysicalNames` 时建立 `name_to_tag` 反查表，
+  物理组按 tag 升序迭代；
+- `spatial` 模块：`Aabb<D>` 与通用 `SpatialIndex<T, D>`（AABB broad phase +
+  均匀网格），供 FEM 点定位与无网格邻域搜索复用；
+- 后处理：`Variable::{value, gradient, divergence, curl}`、`Variable::locate`、
+  `heat::{gradient, flux}`、`elasticity::{strain, stress}`。
+  不提供节点导数或节点平均输出（C0 连续下节点导数不唯一，属于调用方后处理）。
+
+### 修复
+
+- 新增 `MeshError` / `DoubletError` / `VariableError`，公开路径不再使用
+  `unwrap`/`expect`/`panic!`，错误信息携带 path、section、line、物理组、
+  单元与节点 tag 等上下文；
+- GMSH 解析器改用带行号与 section 状态的 `MshReader`：修正
+  `$PhysicalNames` 的字节偏移切分、节点坐标 `D.min` 静默补零、node tag 下溢，
+  并校验节点/元素总数与结束标记；
+- `elements()` 不再通过 `filter_map` 静默丢弃节点缺失的单元；
+- 新增 `MeshError` 错误分支测试和 `try_new_from_doublet` / `Variable::value`
+  越界测试。
+
 ## [0.2.0] - 2026-10-17
 
 首个对外发布的版本。crate 由早期的 `rustfem` 更名为 `ansatz`，定位从"FEM 库"收窄为
@@ -80,5 +135,6 @@
 
 早期内部原型（crate 名 `rustfem`），未发布到 crates.io，保留此条目仅用于说明版本沿革。
 
-[Unreleased]: https://github.com/jmwjc/ansatz/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/jmwjc/ansatz/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/jmwjc/ansatz/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jmwjc/ansatz/releases/tag/v0.2.0

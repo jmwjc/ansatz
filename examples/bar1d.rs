@@ -13,7 +13,9 @@ use faer::sparse::SparseColMat;
 use ansatz::element::poi1::Poi1;
 use ansatz::element::seg2::Seg2;
 use ansatz::node::Node;
-use ansatz::operation::bar::{body_force, displacement_penalty, stiffness, traction};
+use ansatz::operation::bar::{
+    body_force, point_displacement_penalty, point_load, stiffness,
+};
 use ansatz::sparse_vector::try_new_from_doublet;
 use std::time::Instant;
 
@@ -46,7 +48,8 @@ fn main() {
 
     // Left end fixed: impose the displacement constraint u(0) = 0 via the penalty method.
     let alpha: f64 = 1e7;
-    let (penalty_triplets, penalty_doublets) = displacement_penalty(&vec![left], alpha, 0.0);
+    let (penalty_triplets, penalty_doublets) =
+        point_displacement_penalty(&vec![left], alpha, 0.0);
     triplets.extend(penalty_triplets);
 
     let k = SparseColMat::<usize, f64>::try_new_from_triplets(np, np, &triplets).unwrap();
@@ -54,10 +57,10 @@ fn main() {
     // Uniform body force (self-weight): natural boundary condition (body force).
     let mut doublets = body_force(&bars, |_| 1.0);
     // Unit tensile load at the right end: natural boundary condition (concentrated force).
-    doublets.extend(traction(&vec![right], 1.0));
+    doublets.extend(point_load(&vec![right], [1.0]));
     // Penalty load.
     doublets.extend(penalty_doublets);
-    let f = try_new_from_doublet(np, &doublets);
+    let f = try_new_from_doublet(np, &doublets).unwrap();
 
     let llt = k.sp_cholesky(Side::Lower).unwrap();
     let d = llt.solve(&f);

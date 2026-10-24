@@ -32,23 +32,31 @@
 
 ## `operation`
 
-- `operation::Variable<const D, const P, const N>`：`type Item`、`iter()`；对 `&[T]` 与 `Vec<T>` 有 blanket impl。
+- `operation::Variable<const D: usize, const C: usize, const P: usize, const N: usize>`：`C` 为每节点自由度数/分量数；提供 `iter`、`num_dofs`、`locate` / `value` / `derivative_value`；对 `&[T]` 与 `Vec<T>` 有 blanket impl。
+- `Variable::value(x, coefficients) -> Result<Option<[f64; C]>, VariableError>`：在物理点上求值，点外返回 `Ok(None)`；内部用 `locate(x)` 线性扫描单元。
+- `Variable::derivative_value(x, coefficients) -> Result<Option<[[f64; C]; D]>, VariableError>`：返回 `derivative_value[i][k] = ∂u_k / ∂x_i`。
+- `gradient` / `divergence` / `curl` 由具体问题模块实现，不在 `Variable` 上。
+- `spatial`：`Aabb<D>`、`SpatialIndex<T, D>`（AABB broad phase + 均匀网格，可复用于无网格邻域搜索）。
+- `heat::gradient` / `heat::flux`；`elasticity::strain` / `elasticity::stress`。
+- `elasticity::Lame::{from_engineering, three_dimensional, plane_stress, plane_strain, bulk_modulus}`：具名 Lamé 常量。
 - `operation::bar`（1D 桁架组装算子）：
   - `stiffness(v, ea) -> Vec<Triplet<usize, usize, f64>>`
-  - `traction(v, p) -> Vec<Doublet<usize, f64>>`
+  - `point_load(v, [f64; D]) -> Vec<Doublet<usize, f64>>`
   - `body_force(v, f) -> Vec<Doublet<usize, f64>>`
-  - `displacement_penalty(v, penalty, u) -> (Vec<Triplet>, Vec<Doublet>)`
+  - `point_displacement_penalty(v, penalty, u) -> (Vec<Triplet>, Vec<Doublet>)`
 
 ## `io::gmsh`
 
-- `read_gmsh<const D: usize>(path) -> GmshMesh<D>`
-- `GmshMesh<D>`：字段 `nodes`、`physical_names`；方法 `elements<T>(name)`、`elements_by_tag<T>(tag)`。
-- `FromGmsh<const D: usize>`：`GMSH_ELEMENT_TYPE` 常量与 `from_gmsh(...)`。
+- `read_gmsh<const D: usize>(path) -> Result<GmshMesh<D>, MeshError>`
+- `GmshMesh<D>`：字段 `nodes`、`physical_names`；方法 `element_type(name)`、`elements<T>(name)`、`elements_by_tag<T>(tag)`、`node_table()`、`elements_by_tag_with_table<T>(tag, &NodeTable)`、`physical_groups()`、`physical_group(tag)`、`physical_group_by_name(name)`、`physical_names()`、`has_physical_group(name)`。
+- `NodeTable<D>`：稠密节点坐标表（`id == index`），`from_nodes`、`from_map`、`get`、`coords`。
+- `PhysicalGroup<'a>`：`tag`、`name`、`element_type`、`element_count` 的只读视图。
+- `FromGmsh<const D: usize>`：`GMSH_ELEMENT_TYPE`、`GMSH_NODE_COUNT` 常量与 `from_gmsh(ids, &NodeTable) -> Result<Self, MeshError>`。
 
 ## `sparse_vector`
 
 - `Doublet<I, T>`：`(index, value)` 对，`Doublet::new(index, value)`。
-- `try_new_from_doublet(n, &[Doublet]) -> faer::Col<f64>`：把载荷条目累加为稠密向量。
+- `try_new_from_doublet(n, &[Doublet]) -> Result<faer::Col<f64>, DoubletError>`：把载荷条目累加为稠密向量。
 
 ## 常用外部依赖（faer）
 

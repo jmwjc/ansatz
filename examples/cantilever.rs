@@ -15,19 +15,18 @@
 // and a deformed-shape von Mises stress cloud is rendered with `plotters` to
 // `target/cantilever_stress.png` (a second CLI argument overrides the path).
 
-use faer::Side;
 use faer::prelude::*;
 use faer::sparse::SparseColMat;
+use faer::Side;
 use plotters::prelude::*;
 use plotters::style::text_anchor::{HPos, Pos, VPos};
 
-use ansatz::element::Element;
 use ansatz::element::quad4::Quad4;
 use ansatz::element::seg2::Seg2;
+use ansatz::element::Element;
 use ansatz::io::gmsh::read_gmsh;
 use ansatz::operation::elasticity::{
-    displacement_penalty, energy_error, lame_constants, l2_error, plane_stress_lambda, stiffness,
-    traction,
+    Lame, displacement_penalty, energy_error, l2_error, stiffness, stress, traction,
 };
 use ansatz::sparse_vector::try_new_from_doublet;
 
@@ -52,9 +51,12 @@ fn second_moment() -> f64 {
 fn exact_displacement(x: [f64; 2]) -> [f64; 2] {
     let (xx, y) = (x[0], x[1]);
     let i = second_moment();
-    let u = -(P * y / (6.0 * E * i)) * ((6.0 * L - 3.0 * xx) * xx + (2.0 + NU) * (y * y - H * H / 4.0));
+    let u =
+        -(P * y / (6.0 * E * i)) * ((6.0 * L - 3.0 * xx) * xx + (2.0 + NU) * (y * y - H * H / 4.0));
     let v = (P / (6.0 * E * i))
-        * (3.0 * NU * y * y * (L - xx) + (4.0 + 5.0 * NU) * H * H * xx / 4.0 + (3.0 * L - xx) * xx * xx);
+        * (3.0 * NU * y * y * (L - xx)
+            + (4.0 + 5.0 * NU) * H * H * xx / 4.0
+            + (3.0 * L - xx) * xx * xx);
     [u, v]
 }
 
@@ -103,26 +105,9 @@ fn jet(t: f64) -> RGBColor {
 
 /// Plane-stress tensor `(σ_xx, σ_yy, σ_xy)` at a parametric point of an
 /// element, from the nodal displacement vector `d`.
-fn stress_at(
-    elm: &Quad4<2>,
-    xi: [f64; 2],
-    d: &Col<f64>,
-    lambda: f64,
-    mu: f64,
-) -> (f64, f64, f64) {
-    let id = elm.id();
-    let g = elm.derivative_shape(xi);
-    let (mut exx, mut eyy, mut exy) = (0.0, 0.0, 0.0);
-    for a in 0..4 {
-        let (ux, uy) = (d[id[a] * 2], d[id[a] * 2 + 1]);
-        exx += g[a][0] * ux;
-        eyy += g[a][1] * uy;
-        exy += 0.5 * (g[a][1] * ux + g[a][0] * uy);
-    }
-    let sxx = (lambda + 2.0 * mu) * exx + lambda * eyy;
-    let syy = lambda * exx + (lambda + 2.0 * mu) * eyy;
-    let sxy = 2.0 * mu * exy;
-    (sxx, syy, sxy)
+fn stress_at(elm: &Quad4<2>, xi: [f64; 2], d: &[f64], lambda: f64, mu: f64) -> (f64, f64, f64) {
+    let sigma = stress(elm, xi, d, lambda, mu).expect("valid displacement coefficients");
+    (sigma[0][0], sigma[1][1], sigma[0][1])
 }
 
 /// Deformed coordinates of a parametric point: `x + scale · u_h`.
@@ -149,6 +134,7 @@ fn plot_deformed_stress(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let scale = 1.0; // deformation exaggeration factor (true deformation)
     let k = 4; // subdivisions per element edge, for a smooth cloud
+    let d_values: Vec<f64> = d.iter().copied().collect();
 
     // Sub-cell polygons (on the deformed shape) coloured by the von Mises
     // stress at their centre.
@@ -176,8 +162,13 @@ fn plot_deformed_stress(
                     ymin = ymin.min(pts[c].1);
                     ymax = ymax.max(pts[c].1);
                 }
-                let (sxx, syy, sxy) =
-                    stress_at(elm, [(a0 + a1) / 2.0, (b0 + b1) / 2.0], d, lambda, mu);
+                let (sxx, syy, sxy) = stress_at(
+                    elm,
+                    [(a0 + a1) / 2.0, (b0 + b1) / 2.0],
+                    &d_values,
+                    lambda,
+                    mu,
+                );
                 cells.push(Cell {
                     pts,
                     value: von_mises(sxx, syy, sxy),
@@ -187,7 +178,10 @@ fn plot_deformed_stress(
     }
 
     let vmin = cells.iter().map(|c| c.value).fold(f64::INFINITY, f64::min);
-    let vmax = cells.iter().map(|c| c.value).fold(f64::NEG_INFINITY, f64::max);
+    let vmax = cells
+        .iter()
+        .map(|c| c.value)
+        .fold(f64::NEG_INFINITY, f64::max);
     let vspan = (vmax - vmin).max(f64::MIN_POSITIVE);
 
     // Data ranges: geometry plus padding, with the right margin reserved for
@@ -266,7 +260,10 @@ fn plot_deformed_stress(
         chart.draw_series((0..n).map(|i| {
             let t0 = i as f64 / n as f64;
             let t1 = (i + 1) as f64 / n as f64;
-            Rectangle::new([(cb0, ymin + t0 * yspan), (cb1, ymin + t1 * yspan)], jet(t0))
+            Rectangle::new(
+                [(cb0, ymin + t0 * yspan), (cb1, ymin + t1 * yspan)],
+                jet(t0),
+            )
         }))?;
         chart.draw_series(std::iter::once(PathElement::new(
             vec![
@@ -324,10 +321,10 @@ fn main() {
     let path = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "examples/msh/cantilever.msh".to_string());
-    let mesh = read_gmsh::<2>(&path);
-    let units: Vec<Quad4<2>> = mesh.elements("Ω");
-    let left: Vec<Seg2<2>> = mesh.elements("Γu");
-    let right: Vec<Seg2<2>> = mesh.elements("Γt");
+    let mesh = read_gmsh::<2>(&path).unwrap();
+    let units: Vec<Quad4<2>> = mesh.elements("Ω").unwrap();
+    let left: Vec<Seg2<2>> = mesh.elements("Γu").unwrap();
+    let right: Vec<Seg2<2>> = mesh.elements("Γt").unwrap();
 
     // 0-based node ids from the GMSH reader; each node owns D = 2 DOFs.
     let max_id = mesh.nodes.keys().copied().max().unwrap();
@@ -335,8 +332,8 @@ fn main() {
 
     // Plane-stress material: use λ* = Eν/(1 − ν²) for the in-plane volumetric
     // coupling, while μ is unchanged.
-    let lambda = plane_stress_lambda(E, NU);
-    let (_, mu) = lame_constants(E, NU);
+    let lame = Lame::plane_stress(E, NU);
+    let (lambda, mu) = (lame.lambda, lame.mu);
 
     // ---- assembly ----
     let mut triplets = stiffness(&units, lambda, mu);
@@ -353,32 +350,32 @@ fn main() {
 
     // ---- solve ----
     let k = SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
-    let f = try_new_from_doublet(n_dofs, &doublets);
+    let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
     let llt = k.sp_cholesky(Side::Lower).unwrap();
     let d = llt.solve(&f);
 
     // ---- error against the analytical solution ----
     let l2 = l2_error(&units, |id, p| d[id * 2 + p], exact_displacement);
-    let energy = energy_error(
-        &units,
-        |id, p| d[id * 2 + p],
-        exact_strain,
-        lambda,
-        mu,
-    );
+    let energy = energy_error(&units, |id, p| d[id * 2 + p], exact_strain, lambda, mu);
 
     // Tip deflection at (L, 0) for reference.
     let tip_id = mesh
         .nodes
         .iter()
-        .find(|(_, node)| (node.coordinates[0] - L).abs() < 1e-9 && node.coordinates[1].abs() < 1e-9)
+        .find(|(_, node)| {
+            (node.coordinates[0] - L).abs() < 1e-9 && node.coordinates[1].abs() < 1e-9
+        })
         .map(|(id, _)| *id)
         .expect("tip node at (L, 0) not found");
     let tip = [d[tip_id * 2], d[tip_id * 2 + 1]];
     let tip_exact = exact_displacement([L, 0.0]);
 
     println!("== plane-stress cantilever beam ==");
-    println!("  mesh: {} quadrilateral elements, {} DOFs", units.len(), n_dofs);
+    println!(
+        "  mesh: {} quadrilateral elements, {} DOFs",
+        units.len(),
+        n_dofs
+    );
     println!(
         "  tip deflection  FE = ({:.6e}, {:.6e}), exact = ({:.6e}, {:.6e})",
         tip[0], tip[1], tip_exact[0], tip_exact[1]

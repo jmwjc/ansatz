@@ -1,6 +1,7 @@
 use crate::element::{Element, FullIntegration, GaussLegendre1D, IntegrationScheme, ReducedIntegration};
 use crate::node::Node;
 
+#[derive(Clone, Debug, PartialEq)]
 pub struct Seg2<const D: usize> {
     nodes: [Node<D>; 2],
 }
@@ -8,6 +9,18 @@ pub struct Seg2<const D: usize> {
 impl<const D: usize> Seg2<D> {
     pub fn new(n1: Node<D>, n2: Node<D>) -> Self {
         Seg2 { nodes: [n1, n2] }
+    }
+}
+
+impl<const D: usize> Seg2<D> {
+    /// The element's nodes, in local ordering.
+    pub fn nodes(&self) -> &[Node<D>; 2] {
+        &self.nodes
+    }
+
+    /// Node at local index, or `None` if out of bounds.
+    pub fn node(&self, index: usize) -> Option<&Node<D>> {
+        self.nodes.get(index)
     }
 }
 
@@ -48,7 +61,11 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
         std::array::from_fn(|node| {
             std::array::from_fn(|i| {
                 let t = (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i]) / l2;
-                if node == 0 { -t } else { t }
+                if node == 0 {
+                    -t
+                } else {
+                    t
+                }
             })
         })
     }
@@ -102,6 +119,7 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::Seg2;
@@ -137,5 +155,18 @@ mod tests {
         let s2 = Seg2::new(Node::new(0, [0.0, 0.0]), Node::new(1, [3.0, 4.0]));
         assert!(s2.contains([1.5, 2.0]));
         assert!(!s2.contains([1.5, 2.1]));
+    }
+
+    #[test]
+    fn derives_and_node_accessors() {
+        let segment = Seg2::new(Node::new(0, [0.0]), Node::new(1, [1.0]));
+        let copy = segment.clone();
+
+        assert_eq!(segment, copy);
+        assert_eq!(segment.nodes().len(), 2);
+        assert_eq!(segment.node(0).unwrap().id, 0);
+        assert!(segment.node(2).is_none());
+        let _ = format!("{segment:?}");
+        let _node = *segment.node(0).unwrap(); // Node is Copy
     }
 }
