@@ -2,7 +2,7 @@
 
 线弹性力学是结构/连续介质力学的核心物理问题，也是 `ansatz` 在 M3/M4 里程碑要扩展的方向（`Material` trait、平面应力/平面应变、3D 线弹性骨架）。与拉压杆、热传导不同，弹性体中的主变量是**向量场**（位移 $\mathbf u$），应力与应变是**二阶张量**，因此需要先厘清场量之间的基本算子，再走"强形式 → 弱形式 → 伽辽金离散 → 单元组装"的同一条有限元骨架。
 
-> 说明：弹性组装算子已实现于 `src/operation/elasticity.rs`（`stiffness`、`body_force`、`traction`、`displacement_penalty`、`Lame`）；`Material` trait、平面应力/应变与 3D 线弹性问题类型仍在路线图上（`PLAN.md` M3/M4）。
+> 说明：弹性组装算子已实现于 `src/operation/elasticity.rs`（`stiffness`、`body_force`、`traction`、`displacement_penalty`、`displacement_lagrangian`、`Lame`）；`Material` trait、平面应力/应变与 3D 线弹性问题类型仍在路线图上（`PLAN.md` M3/M4）。
 
 ## 1. 场量与基础微分算子
 
@@ -113,7 +113,7 @@ $$
 K = \lambda + \frac{2}{3}\mu = \frac{E}{3(1-2\nu)}
 $$
 
-可见 $\nu \to 0.5$ 时 $K \to \infty$（不可压缩），这会带来有限元中的**体积锁定**问题，是减缩积分/混合格式的动机之一。
+可见 $\nu \to 0.5$ 时 $K \to \infty$（不可压缩），这会带来有限元中的**体积锁定**问题，是减缩积分（选择性减缩积分，见 `Cook 膜`算例）与混合格式（如位移–压力 $u/p$ 格式，速度/位移空间可用非协调的 Crouzeix–Raviart 单元，见「非协调单元：Crouzeix–Raviart（CR）」章）的动机之一。
 
 ### 位移法：Navier–Cauchy 方程
 
@@ -138,7 +138,45 @@ $$
 - **位移（Dirichlet）边界** $\Gamma_u$：给定位移 $\mathbf u = \bar{\mathbf u}$（本质边界条件）；
 - **面力（Neumann）边界** $\Gamma_t$：给定面力 $\boldsymbol\sigma \cdot \mathbf n = \bar{\mathbf t}$（自然边界条件），其中 $\mathbf n$ 是外法向，分量 $\sigma_{ij} n_j = \bar t_i$。
 
-与拉压杆、热传导完全对应：位移边界需显式强加（罚函数法），面力边界在分部积分时自动进入载荷项。
+与拉压杆、热传导完全对应：位移边界需显式强加（罚函数法或拉格朗日乘子法），面力边界在分部积分时自动进入载荷项。
+
+### 3.1 拉格朗日乘子法（精确强加，向量值乘子）
+
+罚函数法以 $\alpha \int_{\Gamma_u} (\mathbf u - \bar{\mathbf u})^2\, d\Gamma$ 近似约束（见「边界条件与罚函数法」章）。若要与热传导问题一样**精确**满足位移约束并顺带得到支座反力，则把 $\mathbf u = \bar{\mathbf u}$ 当作等式约束、引入**向量值**乘子场 $\boldsymbol\lambda$：
+
+$$
+\mathcal L(\mathbf u, \boldsymbol\lambda)
+= \Pi(\mathbf u) + \int_{\Gamma_u} \boldsymbol\lambda \cdot (\mathbf u - \bar{\mathbf u})\, d\Gamma
+$$
+
+鞍点条件（检验空间由 $V_0$ 放宽到 $V$）：
+
+$$
+\begin{cases}
+a(\mathbf u, \mathbf v) + \displaystyle\int_{\Gamma_u} \boldsymbol\lambda\cdot\mathbf v\, d\Gamma = l(\mathbf v), & \forall \mathbf v \in V,\\[2mm]
+\displaystyle\int_{\Gamma_u} \boldsymbol\mu\cdot(\mathbf u - \bar{\mathbf u})\, d\Gamma = 0, & \forall \boldsymbol\mu \in \Lambda .
+\end{cases}
+$$
+
+乘子同样只活在边界上，离散为 $\boldsymbol\lambda_h = \sum_a \Lambda_a \boldsymbol\lambda_a$（每个乘子基函数 $D$ 个分量，全局编号 $a\cdot D + p$，与位移自由度同一约定），于是得到鞍点系统
+
+$$
+\begin{bmatrix} \mathbf K & \mathbf G^{\mathsf T} \\ \mathbf G & \mathbf 0 \end{bmatrix}
+\begin{bmatrix} \mathbf u \\ \boldsymbol\lambda \end{bmatrix}
+=
+\begin{bmatrix} \mathbf F \\ \mathbf g \end{bmatrix},
+\qquad
+G_{(a,p),(b,q)} = \int_{\Gamma_u} \Lambda_a N_b\, \delta_{pq}\, d\Gamma,\quad
+g_{(a,p)} = \int_{\Gamma_u} \Lambda_a \bar u_p\, d\Gamma .
+$$
+
+要点：
+
+- **分量解耦**：约束是逐分量给定的，故 $\mathbf G$ 在分量上是块对角的（$\delta_{pq}$），只出现 $p = q$ 的项；
+- **乘子即边界反力密度**：对照弱形式的面力项 $\int_{\Gamma_t} \bar{\mathbf t}\cdot\mathbf v\, d\Gamma$ 得 $\boldsymbol\lambda = -\boldsymbol\sigma\cdot\mathbf n$（与热传导的 $\lambda = q_n$ 同一规则：乘子等于荷载项中那一项的反号），$\Gamma_u$ 上的反力即 $-\boldsymbol\lambda$；对 `Poi1` 点约束退化为集中反力（N）；
+- **矩阵对称不定**：零对角块、鞍点结构，须用稀疏 LU/$LDL^{\mathsf T}$，不能走 `sp_cholesky`；
+- **混合离散**：$\mathbf u$ 与 $\boldsymbol\lambda$ 可用不同形函数（只要共享同一套边界单元与积分点），常见搭配与"逐点精确 / 积分平均"两种约束含义的讨论与热传导问题完全相同，见「热传导方程」§6 的「乘子空间的选取与混合离散」；
+- **实现**：`operation::elasticity::displacement_lagrangian(&u, &lambda, ū)` 返回**完整**耦合块 $\mathbf G$（$M\cdot D \times N\cdot D$ 全部元素，非对角块不可按三角存储）与 $\mathbf g$，转置块由行列互换得到；两组边界单元配对迭代（积分、几何、雅可比取自位移单元），数量不一致返回 `VariableError::ElementCountMismatch`。
 
 ## 4. Voigt 记号与矩阵算子
 
@@ -403,12 +441,14 @@ $$
 | `body_force(v, f)` | `body_force(v, f)` | $F_{a,p} = \sum_g N_a\, f_p\, |J|\, w_g$（向量载荷） |
 | `traction(v, p)` | `traction(v, t)` | $F_{a,p} = \int_{\Gamma_t} N_a\, \bar t_p\, d\Gamma$（面力，向量） |
 | `displacement_penalty(v, α, ū)` | `displacement_penalty(v, α, ū)` | 罚函数强加向量位移（$\delta_{pq}$，每个分量各罚一次） |
+| —（新增） | `displacement_lagrangian(u, λ, ū)` | 拉格朗日乘子精确施加位移：返回耦合块 $G_{(a,p),(b,q)} = \int_{\Gamma_u} \Lambda_a N_b\, \delta_{pq}\, d\Gamma$（全部元素）与 $g_{(a,p)} = \int_{\Gamma_u} \Lambda_a \bar u_p\, d\Gamma$，需解鞍点系统（见 §3.1） |
 | —（新增） | `Lame::plane_stress(E, ν)` / `Lame::plane_strain(E, ν)` | 由 $E,\nu$ 生成 $\lambda,\mu$ 或平面应力 $\lambda^*$ |
 
 要点：
 
 - `elasticity::stiffness` 与 `bar::stiffness` 同骨架，仅把标量 $EA$ 换成 $\lambda,\mu$、把标量导数点积换成张量分量求和（见上文「张量（指标）形式的单元刚度」小节）：二者都在同一套 `Variable<D, C, P, N>` + `IntegrationScheme` 骨架上累加 `Triplet`；
 - 位移是向量，每个节点的 $D$ 个自由度对应 $D\times D$ 的刚度分块与 $D$ 维载荷分量，全局自由度编号须把节点号映射为 $D$ 个连续编号；
+- 位移的 Dirichlet 条件既可用 `displacement_penalty`（近似、保持对称正定、可走 `sp_cholesky`），也可用 `displacement_lagrangian`（精确、直接给出边界反力，但矩阵不定需 `sp_lu`，且 LU 读取整矩阵，故 `stiffness` 返回的下三角三元组须先对称展开）；
 - **张量表示**贯穿始终：$\boldsymbol\varepsilon = \operatorname{sym}\nabla\mathbf u$、$\boldsymbol\sigma = \mathbf C:\boldsymbol\varepsilon$ 用指标记号写出，而 $\nabla_x N_a$ 由 `derivative_shape` 按 $\nabla_x N = j_\alpha g^{\alpha\beta}\partial_\beta N$ 直接给出——这对任意空间维度 $D$（含曲面单元嵌入 3D）自然成立，无需运行时矩阵求逆（见「雅可比与坐标映射」章）。
 
 ### 常应变单元与 patch test

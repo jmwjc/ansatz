@@ -20,6 +20,7 @@
 - [边界条件与罚函数法](./theory-bc.md)
 - [热传导方程（Heat Equation）](./theory-heat.md)
 - [线弹性力学（Linear Elasticity）](./theory-elasticity.md)
+- [非协调单元：Crouzeix–Raviart（CR）](./theory-cr.md)
 
 # 第三部分：算例
 

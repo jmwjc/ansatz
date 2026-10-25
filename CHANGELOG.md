@@ -9,6 +9,66 @@
 
 ## [Unreleased]
 
+### Added
+
+- `element::cr::CRTri3<D>`：Crouzeix–Raviart 非协调线性三角形，实现 `Element<D, 2, 3>`，
+  自由度为三条边的平均值（基函数 `θᵢ = 1 − 2λᵢ`），2D 质量矩阵恰好对角 `(|T|/3) I`；
+  `CRTri3::from_tri3(&tri, edge_id)` 由 `Tri3` 与"边 → 自由度"闭包构造（节点为边中点，
+  `triangle_vertices()` 反射取回真实顶点），`FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`；
+- `element::tet4::Tet4<D>`：4 节点线性（协调）四面体，实现 `Element<D, 3, 4>`、`FromGmsh`
+  （GMSH 类型 4），`volume()`、`FullIntegration<3, 4>` / `ReducedIntegration<3, 1>`；
+- `element::cr::CRTet4<D>`：Crouzeix–Raviart 非协调线性四面体，实现 `Element<D, 3, 4>`，
+  自由度为四个面的平均值（`θₐ = 1 − 3λₐ`），几何由面重心按 `ΣθₐCₐ = ΣλₐAₐ` 精确重现
+  （`tetrahedron_vertices()` 反射取回顶点），质量为非对角（`2|T|/5` / `−|T|/20`，
+  需 `FullIntegration<3, 4>`），`from_vertices([Node;4], face_id)` 由角点与"面 → 自由度"闭包构造；
+- `element::cr::CRSeg3<D>` / `element::cr::CRTri4<D>`：CR 单元的 facet 迹单元（`CRSeg3` 为 2D 三角形的线段
+  facet、3 个自由度；`CRTri4` 为 3D 四面体的三角 facet、4 个自由度）。自由度为父单元的全部 facet 自由度
+  （`id() == 父单元 id()`），形函数为 `θₐ|facet`（2D：`shape[facet]=1`、`shape[lo]=ξ`、
+  `shape[hi]=−ξ`），几何取 facet 顶点构成的 `Seg2`/`Tri3`（非等参，`jacobe = L/2` / `2×面积`）。
+  于是一般边界算子（`heat_flux`、`convection`、`traction`、`temperature_penalty`、
+  `displacement_penalty`、`*_lagrangian`）可直接用于 CR 的 Neumann/Robin/Dirichlet 处理；
+  `CRSeg3::from_crtri3(&parent, facet)` / `CRTri4::from_crtet4(&parent, facet)` 按"对顶点"编号自动取迹；
+- `GmshOptions::edges` 同时记录每条三角形边的父单元与局部 facet 编号；
+  `GmshMesh::{crtri3_boundary, crtri3_boundary_by_tag}` 把边界线段组读成 `CRSeg3<D>`
+  （自动确定父三角形与局部 facet，非网格边的线段返回 `MeshError::MissingEdge`）；
+- `operation::heat::temperature_lagrangian(&temperature, &multiplier, T_D)`：用拉格朗日
+  乘子精确施加温度本质边界条件，返回耦合块 $G_{aj} = \int_{\Gamma_D} \Lambda_a N_j\,d\Gamma$
+  **全部** `M × N` 个三元组（`G` 位于鞍点系统 `[K Gᵀ; G 0]` 的非对角块，不能按下三角存储）
+  与约束载荷 $g_a = \int_{\Gamma_D} \Lambda_a T_D\,d\Gamma$ 的 `Doublet` 列表；乘子即
+  Dirichlet 边界热流 `λ = q_n`。温度与乘子可用**不同离散**（两组边界单元配对迭代：积分单元、
+  积分点、雅可比取自温度单元，乘子单元只提供形函数与自由度 id），传同一个集合即得边界质量矩阵；
+  鞍点系统对称不定，需 `sp_lu`；
+- `operation::elasticity::displacement_lagrangian(&u, &lambda, ū)`：用（向量值）拉格朗日乘子
+  精确施加位移本质边界条件，返回分量对角的耦合块
+  $G_{(a,p),(b,q)} = \int_{\Gamma_u} \Lambda_a N_b\, \delta_{pq}\, d\Gamma$ **全部**元素与
+  约束载荷 $g_{(a,p)} = \int_{\Gamma_u} \Lambda_a \bar u_p\, d\Gamma$；乘子即
+  $-\boldsymbol\sigma\cdot\mathbf n$（负的边界反力密度）。同样支持位移与乘子的不同离散，
+  需 `sp_lu` 解鞍点系统；
+- `io::gmsh::EdgeTable`：Crouzeix–Raviart 的"边 → 自由度"编号表（`new(offset)`、`id(a, b)`
+  按需分配且与端点顺序无关、`get`、`len`、`offset`）；
+- `GmshOptions::faces`（默认 `false`）：读取时给所有四面体的面编号（`FaceTable`，`0..n_faces`），
+  通过 `GmshMesh::face_numbering` 取回，供三维 CR 单元使用；
+- `io::gmsh::FaceTable`：三维 CR 的"面 → 自由度"编号表（`new(offset)`、`id(a, b, c)` 与顶点顺序无关、
+  `get`、`len`、`offset`）；
+- `GmshMesh::{crtet4_elements, crtet4_elements_by_tag, crtet4_boundary, crtet4_boundary_by_tag}`：
+  把 GMSH 四面体组读成 `CRTet4<D>`、把边界三角形组读成 `CRTri4<D>` 迹单元（未开 `faces` 时返回
+  `MeshError::FaceNumberingMissing`，三角形不是任何四面体的面时返回 `MeshError::MissingFace`）；
+- `GmshOptions::edges`（默认 `false`）：读取时给所有三角形建边编号（`0..n_edges`，
+  与节点编号独立、允许重叠 —— 二者离散的是不同未知量），通过 `GmshMesh::edge_numbering`
+  取回；与 `GmshOptions::renumber` 相互独立（建编号不需要重编号，但物化单元仍需稠密节点号段）；
+- `GmshMesh::{crtri3_elements, crtri3_elements_by_tag}`：用读取时的边编号直接把 GMSH 三角形组读成
+  `CRTri3<D>`（内部即 `Tri3` + `CRTri3::try_from_tri3`），无额外参数；相邻单元在公共边上共享同一
+  自由度；未开 `edges` 时返回新增的 `MeshError::EdgeNumberingMissing`；
+- `GmshMesh::{edge_table, crtri3_elements_with_table, crtri3_elements_by_tag_with_table}`：调用方
+  自带 `EdgeTable` 的版本（`EdgeTable::new(offset)` 可把 CR 自由度整体平移到另一个场之后，
+  适合混合系统；边缺失时返回新增的 `MeshError::MissingEdge`）；
+- `operation::VariableError::ElementCountMismatch`：配对的两组单元数量不一致时由
+  `temperature_lagrangian` / `displacement_lagrangian` 返回，避免静默截断；
+- `io::gmsh::read_gmsh_with(path, GmshOptions)` 与 `io::gmsh::GmshOptions { renumber }`
+  （默认 `false`，即与 `read_gmsh` 行为一致）：开启 `renumber` 时节点 id 按原始 id 升序压紧为
+  `0..n_nodes` 并重映射单元连接关系，使 `node_table()` 必然无空洞、可在 `n_nodes..` 之后安全
+  分配拉格朗日乘子自由度；连接关系引用缺失节点标签时在读取阶段返回 `MeshError::MissingNode`。
+
 ## [0.3.0] - 2026-10-24
 
 ### Breaking Changes

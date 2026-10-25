@@ -40,7 +40,8 @@ fn node_coefficients(
         })
 }
 
-/// Errors produced while evaluating a variable field.
+/// Errors produced while evaluating a variable field, or while assembling an
+/// operator over two element sets.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VariableError {
     /// The coefficient vector is too short for a node's degree of freedom range.
@@ -52,6 +53,13 @@ pub enum VariableError {
     },
     /// Computing a node's coefficient offset overflowed `usize`.
     DofOverflow,
+    /// Two element sets that must be paired element-by-element differ in length.
+    ElementCountMismatch {
+        /// Number of elements in the first set (e.g. the temperature elements).
+        first: usize,
+        /// Number of elements in the second set (e.g. the multiplier elements).
+        second: usize,
+    },
 }
 
 impl fmt::Display for VariableError {
@@ -68,6 +76,10 @@ impl fmt::Display for VariableError {
                 start.saturating_add(*number_of_components)
             ),
             Self::DofOverflow => write!(f, "degree-of-freedom offset overflowed usize"),
+            Self::ElementCountMismatch { first, second } => write!(
+                f,
+                "cannot pair {first} elements with {second} elements: both element sets must have the same length"
+            ),
         }
     }
 }

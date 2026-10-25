@@ -2,7 +2,10 @@
 //!
 //! These are the vector-field (displacement) analogues of the bar operators in
 //! [`super::bar`]: they assemble the elastic stiffness, the volumetric body
-//! force, the surface traction, and the prescribed-displacement penalty terms.
+//! force, the surface traction, and the prescribed-displacement terms — the
+//! latter either approximately, with the penalty method
+//! ([`displacement_penalty`]), or exactly, through the Lagrange-multiplier
+//! coupling assembled by [`displacement_lagrangian`].
 //!
 //! The displacement field is vector-valued, so every operator is expressed over
 //! [`Variable<D, D, P, N>`] (C = D displacement components): node `a` owns `D` global
@@ -466,6 +469,152 @@ where
     (triplets, doublets)
 }
 
+/// Applies a displacement constraint (essential (Dirichlet) boundary condition)
+/// **exactly**, through a Lagrange multiplier, integrated over boundary
+/// elements of any parametric dimension (points, edges, or faces).
+///
+/// This is the multiplier counterpart of [`displacement_penalty`]: the vector
+/// constraint `u = ū` on `Γ_D` is carried by a **vector-valued** multiplier
+/// field `λ_h = Σₐ Λₐ λₐ` (one `D`-component dof per multiplier basis function,
+/// numbered `a·D + p` exactly like the displacement dofs), whose basis `Λₐ` need
+/// not coincide with the displacement shape functions `N_b`. For each boundary
+/// element and quadrature point the operator assembles the **coupling block**
+///
+/// `G_{(a,p),(b,q)} = ∫ Λₐ N_b δ_pq dΓ`  (all `M·D × N·D` entries)
+///
+/// and the **constraint load**
+///
+/// `g_{(a,p)} = ∫ Λₐ ū_p dΓ`  (all `M·D` entries),
+///
+/// with `ū` the closure `u` sampled at each quadrature point. These enter the
+/// saddle-point system
+///
+/// ```text
+/// [ K  Gᵀ ] [ u ]   [ F ]
+/// [ G  0  ] [ λ ] = [ g ]
+/// ```
+///
+/// with `K` the elastic stiffness and `F` the body-force/traction loads. Because
+/// the constraint is imposed component-wise, `G` is **block diagonal in the
+/// components** (`δ_pq`): only the `p = q` entries are emitted.
+///
+/// The multiplier reproduces the (otherwise unknown) traction on `Γ_D`:
+/// comparing with the traction boundary term `∫_{Γ_t} t̄·v dΓ` of the weak form
+/// gives `λ = −σ·n` there, i.e. `λ` is the traction the constraint applies to
+/// the structure with a sign flip — at a hard support its negative is the
+/// reaction force acting on the body.
+///
+/// # Two discretizations
+///
+/// `displacement` and `multiplier` are two element sets paired in iteration
+/// order: element `k` of `multiplier` provides the multiplier basis
+/// (`<L::Item as Element>::shape`) and the multiplier dof ids
+/// (`<L::Item as Element>::id`) for element `k` of `displacement`. They must
+/// therefore have the same length and share the parametric domain `P` and the
+/// geometry of each boundary element, so that the displacement element can
+/// supply the quadrature rule (`T::Item::points` / `weights`, which is why it
+/// needs [`FullIntegration<P, G>`]) and the Jacobian. The multiplier element
+/// only contributes `id` and `shape`; its own geometry and Jacobian are never
+/// queried, so it may be built on stand-in nodes that merely carry the
+/// multiplier dof ids.
+///
+/// Passing the same element set twice is the usual case (the multiplier is
+/// discretized on the displacement nodes) and makes `G` the `δ_pq`-scaled
+/// boundary mass matrix. A multiplier with fewer or differently shaped basis
+/// functions (for example element-wise constant on each boundary edge, i.e. a
+/// piecewise-constant reaction traction) is expressed by a set of elements whose
+/// `shape` returns the desired basis on the shared parametric domain.
+///
+/// # Returned indices and assembly
+///
+/// Unlike the stiffness-like operators in this module, **every** entry of the
+/// coupling block is returned: `G` sits off the diagonal of the saddle-point
+/// system and is not described by a symmetric triangle, so returning only a
+/// lower triangle would lose entries. Rows are multiplier dofs, columns
+/// displacement dofs (`node · D + component` for the displacement, and the same
+/// layout on the multiplier ids); the transposed block `Gᵀ` is assembled by
+/// swapping row and column of each triplet (same value).
+///
+/// The saddle-point matrix is symmetric but indefinite, so it must be factored
+/// with sparse LU (`faer::sparse::SparseColMat::sp_lu`) rather than with a
+/// Cholesky factorization. Because LU reads the whole matrix, the
+/// lower-triangle triplets returned by [`stiffness`] must be mirrored as well
+/// (their convention is meant for Cholesky with `Side::Lower`). See
+/// `book/src/theory-elasticity.md` §3 and `book/src/theory-heat.md` §6 for the
+/// theory.
+///
+/// `displacement` holds boundary elements (implementing [`Variable<D, D, P, N>`]);
+/// each must implement [`FullIntegration<P, G>`]. For a point element
+/// ([`crate::element::poi1::Poi1`]) this reduces to a single-node vector
+/// constraint, where `G` degenerates to the identity and `λₐ` to the
+/// concentrated reaction force at that node.
+///
+/// # Errors
+///
+/// Returns [`VariableError::ElementCountMismatch`] if the two element sets hold
+/// a different number of elements.
+pub fn displacement_lagrangian<
+    T,
+    L,
+    const D: usize,
+    const P: usize,
+    const N: usize,
+    const M: usize,
+    const G: usize,
+>(
+    displacement: &T,
+    multiplier: &L,
+    u: impl Fn([f64; D]) -> [f64; D],
+) -> Result<TripletsAndDoublets, VariableError>
+where
+    T: Variable<D, D, P, N>,
+    T::Item: Element<D, P, N> + FullIntegration<P, G>,
+    L: Variable<D, D, P, M>,
+    L::Item: Element<D, P, M>,
+{
+    let (n_displacement, n_multiplier) = (displacement.iter().count(), multiplier.iter().count());
+    if n_displacement != n_multiplier {
+        return Err(VariableError::ElementCountMismatch {
+            first: n_displacement,
+            second: n_multiplier,
+        });
+    }
+
+    let ξ = T::Item::points();
+    let w = T::Item::weights();
+    let mut triplets: Triplets = Vec::with_capacity(M * N * D * G);
+    let mut doublets: Doublets = Vec::with_capacity(M * D * G);
+    for (elm, lelm) in displacement.iter().zip(multiplier.iter()) {
+        let id = elm.id();
+        let lid = lelm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let shape = elm.shape(ξg);
+            let lambda_shape = lelm.shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            let ug = u(elm.coordinates(ξg));
+            for a in 0..M {
+                for b in 0..N {
+                    // G_{(a,p),(b,q)} = ∫ Λₐ N_b δ_pq |J| w: component-diagonal.
+                    let value = lambda_shape[a] * shape[b] * jacobe * wg;
+                    for p in 0..D {
+                        triplets.push(Triplet::new(lid[a] * D + p, id[b] * D + p, value));
+                    }
+                }
+                for (p, &up) in ug.iter().enumerate() {
+                    // g_{a,p} = ∫ Λₐ ū_p |J| w.
+                    doublets.push(Doublet::new(
+                        lid[a] * D + p,
+                        lambda_shape[a] * up * jacobe * wg,
+                    ));
+                }
+            }
+        }
+    }
+    Ok((triplets, doublets))
+}
+
 /// Computes the L² error `‖u_h − u‖_{L²} = (∫ |u_h − u|² dΩ)^{1/2}` between the
 /// finite-element displacement field `u_h` and the exact displacement field
 /// `u`, element-wise with numerical quadrature.
@@ -648,6 +797,8 @@ mod tests {
     use crate::element::tri3::Tri3;
     use crate::node::Node;
     use crate::sparse_vector::try_new_from_doublet;
+    use faer::prelude::*;
+    use faer::sparse::SparseColMat;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-8
@@ -1086,6 +1237,200 @@ mod tests {
             energy < 2e-1,
             "cantilever energy error too large: {energy:e}"
         );
+    }
+
+    /// Test-only multiplier element: a constant (`P0`-like) vector basis on a
+    /// 1D-parametric edge embedded in `D` dimensions.
+    ///
+    /// It shares the parametric domain of [`Seg2`] (`P = 1`) but carries a
+    /// single `D`-component multiplier dof whose basis function is identically
+    /// one. The dof id is carried by `dof`; the geometry in `ends` only exists to
+    /// satisfy the trait, because [`displacement_lagrangian`] takes the quadrature
+    /// and the Jacobian from the displacement element.
+    struct ConstantEdge<const D: usize> {
+        dof: Node<D>,
+        ends: [Node<D>; 2],
+    }
+
+    impl<const D: usize> ConstantEdge<D> {
+        fn new(dof: usize, a: [f64; D], b: [f64; D]) -> Self {
+            Self {
+                dof: Node::new(dof, a),
+                ends: [Node::new(0, a), Node::new(1, b)],
+            }
+        }
+    }
+
+    impl<const D: usize> Element<D, 1, 1> for ConstantEdge<D> {
+        fn id(&self) -> [usize; 1] {
+            [self.dof.id]
+        }
+        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
+            [1.0]
+        }
+        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
+            [[0.0; D]; 1]
+        }
+        fn vertices_coordinates(&self) -> [[f64; D]; 1] {
+            [self.ends[0].coordinates]
+        }
+        fn coordinates(&self, _parametric_coordinates: [f64; 1]) -> [f64; D] {
+            self.ends[0].coordinates
+        }
+        fn jacobe(&self, _parametric_coordinates: [f64; 1]) -> f64 {
+            1.0
+        }
+        fn jacobe_mat(&self, _parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
+            [[1.0; D]; 1]
+        }
+        fn local_coordinates(&self, _x: [f64; D]) -> Option<[f64; 1]> {
+            Some([0.0])
+        }
+    }
+
+    /// Collects triplets into a dense `n × n` matrix (accumulating quadrature
+    /// contributions), so that both triangles of an operator can be inspected.
+    fn dense(triplets: &Triplets, n: usize) -> Vec<Vec<f64>> {
+        let mut a = vec![vec![0.0; n]; n];
+        for t in triplets {
+            a[t.row][t.col] += t.val;
+        }
+        a
+    }
+
+    #[test]
+    fn displacement_lagrangian_component_diagonal_block() {
+        // A Seg2<2> boundary edge from (0,0) to (3,4) (length L = 5) in 2D,
+        // with the multiplier discretized on the same two nodes.
+        // G_{(a,p),(b,q)} = δ_pq ∫ Nₐ N_b dΓ, and ∫ NₐN_b dΓ = (L/6)[[2,1],[1,2]].
+        // The full 4 × 4 block is returned, and the p ≠ q entries are absent.
+        let edge: Vec<Seg2<2>> = vec![Seg2::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 4.0]),
+        )];
+        let (triplets, _) = displacement_lagrangian(&edge, &edge, |_| [0.0, 0.0]).unwrap();
+        let g = dense(&triplets, 4);
+
+        for p in 0..2 {
+            for q in 0..2 {
+                for a in 0..2 {
+                    for b in 0..2 {
+                        let expected = if p == q {
+                            5.0 / 6.0 * if a == b { 2.0 } else { 1.0 }
+                        } else {
+                            0.0
+                        };
+                        assert!(
+                            close(g[a * 2 + p][b * 2 + q], expected),
+                            "G[({a},{p}),({b},{q})] = {} != {expected}",
+                            g[a * 2 + p][b * 2 + q]
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn displacement_lagrangian_mixed_basis() {
+        // Same edge, but the multiplier is constant (1 vector dof) while the
+        // displacement is linear (2 nodes): G_{(0,p),(b,q)} = δ_pq ∫ N_b dΓ,
+        // i.e. rows [L/2, L/2] = [2.5, 2.5] per component, and
+        // g_{(0,p)} = ū_p L = [5, 10] for ū = (1, 2).
+        let edge: Vec<Seg2<2>> = vec![Seg2::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 4.0]),
+        )];
+        let multipliers: Vec<ConstantEdge<2>> = vec![ConstantEdge::new(7, [0.0, 0.0], [3.0, 4.0])];
+        let (triplets, doublets) =
+            displacement_lagrangian(&edge, &multipliers, |_| [1.0, 2.0]).unwrap();
+
+        // Rows are the multiplier dofs (7·D + p, i.e. 14 and 15), columns the
+        // displacement dofs (node · 2 + component).
+        let mut g = [[0.0_f64; 4]; 2];
+        for t in &triplets {
+            assert!((14..16).contains(&t.row), "multiplier dofs are 14 and 15");
+            g[t.row - 14][t.col] += t.val;
+        }
+        for (p, row) in g.iter().enumerate() {
+            for (col, value) in row.iter().enumerate() {
+                let expected = if col % 2 == p { 2.5 } else { 0.0 };
+                assert!(
+                    close(*value, expected),
+                    "G[{p}][{col}] = {value} != {expected}"
+                );
+            }
+        }
+
+        let mut f = [0.0_f64; 2];
+        for d in &doublets {
+            f[d.index - 14] += d.value;
+        }
+        assert!(close(f[0], 5.0));
+        assert!(close(f[1], 10.0));
+    }
+
+    #[test]
+    fn displacement_lagrangian_rejects_mismatched_element_sets() {
+        let edges: Vec<Seg2<1>> = vec![
+            Seg2::new(Node::new(0, [0.0]), Node::new(1, [2.0])),
+            Seg2::new(Node::new(1, [2.0]), Node::new(2, [4.0])),
+        ];
+        let one: Vec<ConstantEdge<1>> = vec![ConstantEdge::new(5, [0.0], [4.0])];
+        let err = displacement_lagrangian(&edges, &one, |_| [0.0]).unwrap_err();
+        assert_eq!(
+            err,
+            VariableError::ElementCountMismatch {
+                first: 2,
+                second: 1
+            }
+        );
+    }
+
+    #[test]
+    fn lagrangian_saddle_point_is_exact() {
+        // 1D bar over [0, 4], E = 2 (λ = 0, μ = 1 gives E = λ + 2μ = 2), two
+        // Seg2 elements, u(0) = 0 and a point load P = 1 at x = 4 (a `Poi1`
+        // traction element). Exact solution: u = P x / E = x / 2, so the nodal
+        // values are [0, 1, 2] and the multiplier is λ = −σ·n = −(−1) = 1 at the
+        // support (σ = E u' = 1, outward normal n = −x̂).
+        let (lambda, mu) = (0.0, 1.0);
+        let bars: Vec<Seg2<1>> = vec![
+            Seg2::new(Node::new(0, [0.0]), Node::new(1, [2.0])),
+            Seg2::new(Node::new(1, [2.0]), Node::new(2, [4.0])),
+        ];
+        // Displacement boundary point at x = 0 and the multiplier carrying dof id 3.
+        let ends: Vec<Poi1<1>> = vec![Poi1::new(Node::new(0, [0.0]))];
+        let multipliers: Vec<Poi1<1>> = vec![Poi1::new(Node::new(3, [0.0]))];
+        let tip: Vec<Poi1<1>> = vec![Poi1::new(Node::new(2, [4.0]))];
+
+        // Sparse LU reads the whole matrix, so mirror the lower-triangle stiffness
+        // triplets (the `Side::Lower` Cholesky convention does not apply here).
+        let mut triplets: Triplets = Vec::new();
+        for t in stiffness(&bars, lambda, mu) {
+            if t.row != t.col {
+                triplets.push(Triplet::new(t.col, t.row, t.val));
+            }
+            triplets.push(t);
+        }
+        let (gt, gd) = displacement_lagrangian(&ends, &multipliers, |_| [0.0]).unwrap();
+        for t in &gt {
+            triplets.push(Triplet::new(t.row, t.col, t.val));
+            triplets.push(Triplet::new(t.col, t.row, t.val));
+        }
+        let mut doublets = traction(&tip, |_| [1.0]);
+        doublets.extend(gd);
+
+        let n_dofs = 4; // 3 displacement dofs + 1 multiplier
+        let k =
+            SparseColMat::<usize, f64>::try_new_from_triplets(n_dofs, n_dofs, &triplets).unwrap();
+        let f = try_new_from_doublet(n_dofs, &doublets).unwrap();
+        let d = k.sp_lu().unwrap().solve(&f);
+
+        assert!(close(d[0], 0.0));
+        assert!(close(d[1], 1.0));
+        assert!(close(d[2], 2.0));
+        assert!(close(d[3], 1.0));
     }
 
     #[test]

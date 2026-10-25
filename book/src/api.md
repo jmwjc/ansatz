@@ -27,6 +27,10 @@
 
 - `element::seg2::Seg2<D>`：`new(n1, n2)`，2 节点线单元；
 - `element::tri3::Tri3<D>`：`new(n1, n2, n3)`，3 节点三角形；
+- `element::cr::CRTri3<D>`：`new(m1, m2, m3)`（三个边中点）、`from_tri3(&tri, edge_id)`、`triangle_vertices()`，Crouzeix–Raviart 非协调线性三角形；
+- `element::tet4::Tet4<D>`：`new(n1..n4)`、`volume()`，4 节点线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`，`FromGmsh` 类型 4）；
+- `element::cr::CRTet4<D>`：`new(f1..f4)`（四个面重心）、`from_tet4(&Tet4, face_id)`、`from_vertices([Node;4], face_id)`（及对应的 `try_*`）、`tetrahedron_vertices()`、`volume()`，CR 非协调线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`）；
+- `element::cr::CRSeg3<D>` / `element::cr::CRTri4<D>`：CR 的 facet 迹单元（2D 线段 / 3D 三角形），`new(facets, parent_vertices, facet)`、`CRSeg3::from_crtri3(&parent, facet)`、`CRTri4::from_crtet4(&parent, facet)`、`local_facet()`、`facet_vertices()`、`parent_vertices()`，用于边界条件；
 - `element::quad4::Quad4<D>`：`new(n1, n2, n3, n4)`，4 节点四边形；
 - `element::poi1::Poi1<D>`：`new(node)`，1 节点点单元。
 
@@ -48,8 +52,12 @@
 ## `io::gmsh`
 
 - `read_gmsh<const D: usize>(path) -> Result<GmshMesh<D>, MeshError>`
+- `read_gmsh_with<const D: usize>(path, GmshOptions) -> Result<GmshMesh<D>, MeshError>`：带预处理选项；
+- `GmshOptions { renumber: bool, edges: bool, faces: bool }`：读取期预处理开关，`Default` 全为 `false`（保持 GMSH 原始 `tag - 1` 编号、不建边/面编号）。`faces` 为所有四面体建立面编号（3D CR）。`renumber` 把节点 id 压紧为 `0..n_nodes` 并重映射连接关系（拉格朗日乘子、CR 等需要连续节点段）；`edges` 为所有三角形建立边编号（`0..n_edges`，与节点编号独立、可重叠），供 CR 单元直接读取
 - `GmshMesh<D>`：字段 `nodes`、`physical_names`；方法 `element_type(name)`、`elements<T>(name)`、`elements_by_tag<T>(tag)`、`node_table()`、`elements_by_tag_with_table<T>(tag, &NodeTable)`、`physical_groups()`、`physical_group(tag)`、`physical_group_by_name(name)`、`physical_names()`、`has_physical_group(name)`。
 - `NodeTable<D>`：稠密节点坐标表（`id == index`），`from_nodes`、`from_map`、`get`、`coords`。
+- `EdgeTable`：Crouzeix–Raviart 的边自由度编号表，`new(offset)`（`offset` 默认为 0，仅混合系统需要平移）、`id(a, b)`（按需分配、与端点顺序无关）、`get(a, b)`、`len()`、`offset()`。
+- `GmshMesh::{edge_table, edge_numbering, crtri3_elements, crtri3_elements_by_tag, crtri3_elements_with_table, crtri3_elements_by_tag_with_table}`：把三角形组读成 `Cr3<D>`；`crtri3_elements*` 使用 `GmshOptions::edges` 建好的编号（无额外参数），`*_with_table` 使用调用方给的 `EdgeTable`。
 - `PhysicalGroup<'a>`：`tag`、`name`、`element_type`、`element_count` 的只读视图。
 - `FromGmsh<const D: usize>`：`GMSH_ELEMENT_TYPE`、`GMSH_NODE_COUNT` 常量与 `from_gmsh(ids, &NodeTable) -> Result<Self, MeshError>`。
 

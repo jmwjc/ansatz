@@ -89,3 +89,7 @@ $$
 
 - `derivative_shape` 返回**物理梯度** $\nabla_x N = [\partial N/\partial x_1, \dots, \partial N/\partial x_D]$（关于物理坐标求导，而非参数坐标），类型为 `[[f64; D]; N]`；
 - 各单元通过雅可比矩阵 $J = \partial x/\partial \xi$ 把参数导数变换为物理梯度：线单元取切向投影 $\nabla_x N = \pm \hat t/L$，面单元用 $\nabla_x N = J(J^\mathsf T J)^{-1} \nabla_\xi N$。
+
+## 协调与非协调
+
+以上所有单元的相邻单元在公共边界上**逐点连续**（形函数在节点处满足 Kronecker δ，界面上的迹由两侧共享的节点值唯一确定），因此全局空间是 $H^1$ 的子空间，称为**协调**（conforming）单元。若把自由度从"顶点值"改为"边上的积分平均"，只保留界面量的**平均**连续，就得到**非协调**单元。最经典的例子是 Crouzeix–Raviart 单元，它的 2D 质量矩阵恰好对角，并且是不可压缩（Stokes）问题的标准速度空间，详见「非协调单元：Crouzeix–Raviart（CR）」章。

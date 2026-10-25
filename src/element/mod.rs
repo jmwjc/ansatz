@@ -1,6 +1,8 @@
+pub mod cr;
 pub mod poi1;
 pub mod quad4;
 pub mod seg2;
+pub mod tet4;
 pub mod tri3;
 
 /// Tolerance used by the containment / inverse-map checks (`local_coordinates`,
@@ -8,6 +10,35 @@ pub mod tri3;
 /// coordinates and, scaled by the element's characteristic size, to physical
 /// residual distances.
 pub(crate) const CONTAINS_TOL: f64 = 1e-10;
+
+/// Inverse of a symmetric `3 × 3` matrix, given as
+/// `[g00, g01, g02, g11, g12, g22]`; returns the inverse in the same layout together
+/// with the determinant.
+///
+/// Used by the 3D elements (`Tet4`, `CRTet4`) for the metric tensor
+/// `g_{αβ} = J_α · J_β` and for their inverse isoparametric maps.
+pub(crate) fn inverse_symmetric_3x3(g: [f64; 6]) -> ([f64; 6], f64) {
+    let [g00, g01, g02, g11, g12, g22] = g;
+    let c00 = g11 * g22 - g12 * g12;
+    let c01 = g02 * g12 - g01 * g22;
+    let c02 = g01 * g12 - g02 * g11;
+    let c11 = g00 * g22 - g02 * g02;
+    let c12 = g01 * g02 - g00 * g12;
+    let c22 = g00 * g11 - g01 * g01;
+    let det = g00 * c00 + g01 * c01 + g02 * c02;
+    let scale = if det == 0.0 { 0.0 } else { 1.0 / det };
+    (
+        [
+            c00 * scale,
+            c01 * scale,
+            c02 * scale,
+            c11 * scale,
+            c12 * scale,
+            c22 * scale,
+        ],
+        det,
+    )
+}
 
 pub trait Element<const D: usize, const P: usize, const N: usize> {
     fn id(&self) -> [usize; N];

@@ -4,7 +4,9 @@
 //! they assemble the conduction stiffness, the heat-capacity (mass) matrix,
 //! and the load terms arising from volumetric heat sources, prescribed
 //! boundary heat fluxes, convection (Robin) boundaries, and prescribed
-//! temperatures (Dirichlet, via the penalty method).
+//! temperatures (Dirichlet) — the latter either approximately, with the penalty
+//! method ([`temperature_penalty`]), or exactly, with the Lagrange-multiplier
+//! coupling assembled by [`temperature_lagrangian`].
 //!
 //! All operators reuse the [`crate::element::Element`] / [`Variable`] /
 //! [`crate::element::IntegrationScheme`] abstractions; see
@@ -232,6 +234,137 @@ where
     (triplets, doublets)
 }
 
+/// Applies a temperature constraint (essential (Dirichlet) boundary condition)
+/// **exactly**, through a Lagrange multiplier, integrated over boundary
+/// elements of any parametric dimension (points, edges, or faces).
+///
+/// This is the multiplier counterpart of [`temperature_penalty`]: the constraint
+/// `T = T_D` on `Γ_D` is carried by a multiplier field `λ_h = Σₐ λₐ Λₐ` whose
+/// basis `Λₐ` need not coincide with the temperature shape functions `Nⱼ`. For
+/// each boundary element and quadrature point the operator assembles the
+/// **coupling block**
+///
+/// `Gₐⱼ = ∫ Λₐ Nⱼ dΓ`  (all `M × N` entries)
+///
+/// and the **constraint load**
+///
+/// `gₐ = ∫ Λₐ T_D dΓ`  (all `M` entries),
+///
+/// where `td` maps physical coordinates to the prescribed temperature `T_D`
+/// (sampled at each quadrature point). These enter the saddle-point system
+///
+/// ```text
+/// [ K  Gᵀ ] [ T ]   [ F ]
+/// [ G  0  ] [ λ ] = [ g ]
+/// ```
+///
+/// with `K` the conduction (`+` convection) matrix and `F` the source/flux
+/// loads; the multiplier is the outward heat flux `λ = q_n` on `Γ_D`, which the
+/// penalty method only approximates by `α (T_h − T_D)`.
+///
+/// # Two discretizations
+///
+/// `temperature` and `multiplier` are two element sets paired in iteration
+/// order: element `k` of `multiplier` provides the multiplier basis
+/// (`<L::Item as Element>::shape`) and the global multiplier dof ids
+/// (`<L::Item as Element>::id`) for element `k` of `temperature`. They must
+/// therefore have the same length and share the parametric domain `P` and the
+/// geometry of each boundary element, so that the temperature element can supply
+/// the quadrature rule (`T::Item::points` / `weights`, which is why it needs
+/// [`FullIntegration<P, G>`]) and the Jacobian. The multiplier element only
+/// contributes `id` and `shape`; its own geometry and Jacobian are never
+/// queried, so it may be built on stand-in nodes that merely carry the
+/// multiplier dof ids.
+///
+/// Passing the same element set twice is the usual case (the multiplier is
+/// discretized on the temperature nodes) and makes `G` the boundary mass
+/// matrix. A multiplier with fewer or differently shaped basis functions (for
+/// example element-wise constant on each boundary edge) is expressed by a set of
+/// elements whose `shape` returns the desired basis on the shared parametric
+/// domain.
+///
+/// # Returned indices and assembly
+///
+/// Unlike the stiffness-like operators in this module, **every** entry of the
+/// coupling block is returned: `G` sits off the diagonal of the saddle-point
+/// system and is not described by a symmetric triangle, so returning only a
+/// lower triangle would lose entries. Rows are multiplier dofs, columns
+/// temperature dofs; the transposed block `Gᵀ` is assembled by swapping the row
+/// and column of each triplet (same value).
+///
+/// The saddle-point matrix is symmetric but indefinite, so it must be factored
+/// with sparse LU (`faer::sparse::SparseColMat::sp_lu`) rather than with a
+/// Cholesky factorization. Because LU reads the whole matrix, the
+/// lower-triangle triplets returned by [`conduction_stiffness`] / [`convection`]
+/// must be mirrored as well (their convention is meant for Cholesky with
+/// `Side::Lower`). See `book/src/theory-heat.md` §6 for the theory.
+///
+/// `temperature` holds boundary elements (implementing [`Variable<D, 1, P, N>`]);
+/// each must implement [`FullIntegration<P, G>`]. For a point element
+/// ([`crate::element::poi1::Poi1`]) this reduces to a single-node constraint,
+/// where `G` degenerates to the identity and `λₐ` to the total heat flow (W)
+/// leaving through that node.
+///
+/// # Errors
+///
+/// Returns [`VariableError::ElementCountMismatch`] if the two element sets hold
+/// a different number of elements.
+pub fn temperature_lagrangian<
+    T,
+    L,
+    const D: usize,
+    const P: usize,
+    const N: usize,
+    const M: usize,
+    const G: usize,
+>(
+    temperature: &T,
+    multiplier: &L,
+    td: impl Fn([f64; D]) -> f64,
+) -> Result<TripletsAndDoublets, VariableError>
+where
+    T: Variable<D, 1, P, N>,
+    T::Item: Element<D, P, N> + FullIntegration<P, G>,
+    L: Variable<D, 1, P, M>,
+    L::Item: Element<D, P, M>,
+{
+    let (n_temperature, n_multiplier) = (temperature.iter().count(), multiplier.iter().count());
+    if n_temperature != n_multiplier {
+        return Err(VariableError::ElementCountMismatch {
+            first: n_temperature,
+            second: n_multiplier,
+        });
+    }
+
+    let ξ = T::Item::points();
+    let w = T::Item::weights();
+    let mut triplets: Triplets = Vec::with_capacity(M * N * G);
+    let mut doublets: Doublets = Vec::with_capacity(M * G);
+    for (elm, lelm) in temperature.iter().zip(multiplier.iter()) {
+        let id = elm.id();
+        let lid = lelm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let shape = elm.shape(ξg);
+            let lambda_shape = lelm.shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            let td_g = td(elm.coordinates(ξg));
+            for a in 0..M {
+                for j in 0..N {
+                    triplets.push(Triplet::new(
+                        lid[a],
+                        id[j],
+                        lambda_shape[a] * shape[j] * jacobe * wg,
+                    ));
+                }
+                doublets.push(Doublet::new(lid[a], lambda_shape[a] * td_g * jacobe * wg));
+            }
+        }
+    }
+    Ok((triplets, doublets))
+}
+
 /// Applies a Robin (convective) boundary condition, integrated over boundary
 /// elements of any parametric dimension (points, edges, or faces).
 ///
@@ -408,9 +541,9 @@ mod tests {
     use crate::element::seg2::Seg2;
     use crate::node::Node;
     use crate::sparse_vector::try_new_from_doublet;
+    use faer::Side;
     use faer::prelude::*;
     use faer::sparse::SparseColMat;
-    use faer::Side;
 
     fn close(a: f64, b: f64) -> bool {
         (a - b).abs() < 1e-5
@@ -635,6 +768,185 @@ mod tests {
         }
         assert!(close(f0, alpha * td * 4.0 / 2.0));
         assert!(close(f1, alpha * td * 4.0 / 2.0));
+    }
+
+    /// Test-only multiplier element: a constant (`P0`-like) basis on a 1D edge.
+    ///
+    /// It shares the parametric domain of [`Seg2`] (`P = 1`) but carries a
+    /// single degree of freedom whose basis function is identically one. The
+    /// dof id is carried by `dof`; the geometry stored in `ends` is only there
+    /// to satisfy the trait, because [`temperature_lagrangian`] takes the
+    /// quadrature and the Jacobian from the temperature element.
+    struct ConstantEdge {
+        dof: Node<1>,
+        ends: [Node<1>; 2],
+    }
+
+    impl ConstantEdge {
+        fn new(dof: usize, a: f64, b: f64) -> Self {
+            Self {
+                dof: Node::new(dof, [a]),
+                ends: [Node::new(0, [a]), Node::new(1, [b])],
+            }
+        }
+    }
+
+    impl Element<1, 1, 1> for ConstantEdge {
+        fn id(&self) -> [usize; 1] {
+            [self.dof.id]
+        }
+        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
+            [1.0]
+        }
+        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; 1]; 1] {
+            [[0.0]]
+        }
+        fn vertices_coordinates(&self) -> [[f64; 1]; 1] {
+            [self.ends[0].coordinates]
+        }
+        fn coordinates(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
+            self.ends[0].coordinates
+        }
+        fn jacobe(&self, _parametric_coordinates: [f64; 1]) -> f64 {
+            1.0
+        }
+        fn jacobe_mat(&self, _parametric_coordinates: [f64; 1]) -> [[f64; 1]; 1] {
+            [[1.0]]
+        }
+        fn local_coordinates(&self, x: [f64; 1]) -> Option<[f64; 1]> {
+            let (a, b) = (self.ends[0].coordinates[0], self.ends[1].coordinates[0]);
+            ((x[0] - a) * (x[0] - b) <= 0.0).then_some([0.0])
+        }
+    }
+
+    #[test]
+    fn temperature_lagrangian_integrates_over_segment() {
+        // A Seg2<1> boundary element of length L = 4 with T_D = x/4, and the
+        // multiplier discretized on the same nodes.
+        // G = ∫ NᵢNⱼ dx = (L/6) [[2, 1], [1, 2]] = [[4/3, 2/3], [2/3, 4/3]]
+        // (all four entries are returned, the block is not a symmetric triangle).
+        // g = ∫ Nᵢ T_D dx = G [0, 1]ᵀ for this linear T_D = [2/3, 4/3].
+        let segs: Vec<Seg2<1>> = vec![Seg2::new(Node::new(0, [0.0]), Node::new(1, [4.0]))];
+        let (triplets, doublets) =
+            temperature_lagrangian(&segs, &segs, |x: [f64; 1]| x[0] / 4.0).unwrap();
+
+        let mut g = [[0.0_f64; 2]; 2];
+        for t in &triplets {
+            g[t.row][t.col] += t.val;
+        }
+        assert!(close(g[0][0], 4.0 / 3.0));
+        assert!(close(g[0][1], 2.0 / 3.0));
+        assert!(close(g[1][0], 2.0 / 3.0));
+        assert!(close(g[1][1], 4.0 / 3.0));
+
+        let mut f = [0.0_f64; 2];
+        for d in &doublets {
+            f[d.index] += d.value;
+        }
+        assert!(close(f[0], 2.0 / 3.0));
+        assert!(close(f[1], 4.0 / 3.0));
+    }
+
+    #[test]
+    fn temperature_lagrangian_mixed_basis() {
+        // Same boundary edge [0, 4], but the multiplier is constant (1 dof)
+        // while the temperature is linear (2 dofs):
+        // G = [∫1·N₀ dΓ, ∫1·N₁ dΓ] = [L/2, L/2] = [2, 2],
+        // g = ∫1·T_D dΓ = L·T_D = 12 for T_D = 3.
+        let segs: Vec<Seg2<1>> = vec![Seg2::new(Node::new(0, [0.0]), Node::new(1, [4.0]))];
+        let multipliers: Vec<ConstantEdge> = vec![ConstantEdge::new(7, 0.0, 4.0)];
+        let (triplets, doublets) = temperature_lagrangian(&segs, &multipliers, |_| 3.0).unwrap();
+
+        let mut g = [0.0_f64; 2];
+        for t in &triplets {
+            assert_eq!(t.row, 7, "the multiplier has a single dof");
+            g[t.col] += t.val;
+        }
+        assert!(close(g[0], 2.0));
+        assert!(close(g[1], 2.0));
+
+        let mut f = 0.0;
+        for d in &doublets {
+            assert_eq!(d.index, 7);
+            f += d.value;
+        }
+        assert!(close(f, 12.0));
+    }
+
+    #[test]
+    fn temperature_lagrangian_rejects_mismatched_element_sets() {
+        let segs: Vec<Seg2<1>> = vec![
+            Seg2::new(Node::new(0, [0.0]), Node::new(1, [2.0])),
+            Seg2::new(Node::new(1, [2.0]), Node::new(2, [4.0])),
+        ];
+        let one: Vec<ConstantEdge> = vec![ConstantEdge::new(5, 0.0, 4.0)];
+        let err = temperature_lagrangian(&segs, &one, |_| 0.0).unwrap_err();
+        assert_eq!(
+            err,
+            VariableError::ElementCountMismatch {
+                first: 2,
+                second: 1
+            }
+        );
+        let message = err.to_string();
+        assert!(message.contains("cannot pair 2 elements with 1 elements"));
+    }
+
+    #[test]
+    fn lagrangian_saddle_point_is_exact() {
+        // Two Seg2 elements over [0, 4], k = 2, no source, T(0) = 0, T(4) = 1.
+        // Steady k T'' = 0 -> T = x/4, so T(2) = 0.5 exactly (no penalty error).
+        // The multipliers are the outward fluxes: at the cold end heat leaves
+        // (λ = +k/4 = 0.5), at the hot end it enters (λ = -k/4 = -0.5), so
+        // Σλ = 0 as required by the global heat balance.
+        let k = 2.0;
+        let bars: Vec<Seg2<1>> = vec![
+            Seg2::new(Node::new(0, [0.0]), Node::new(1, [2.0])),
+            Seg2::new(Node::new(1, [2.0]), Node::new(2, [4.0])),
+        ];
+        // Temperature boundary points at x = 0 and x = 4, and multiplier
+        // elements carrying the constrained dof ids 3 and 4 (after the 3
+        // temperature unknowns).
+        let ends: [Vec<Poi1<1>>; 2] = [
+            vec![Poi1::new(Node::new(0, [0.0]))],
+            vec![Poi1::new(Node::new(2, [4.0]))],
+        ];
+        let multipliers: [Vec<Poi1<1>>; 2] = [
+            vec![Poi1::new(Node::new(3, [0.0]))],
+            vec![Poi1::new(Node::new(4, [4.0]))],
+        ];
+
+        // Sparse LU reads the whole matrix, so mirror the lower-triangle stiffness
+        // triplets (the `Side::Lower` Cholesky convention does not apply here).
+        let mut triplets: Triplets = Vec::new();
+        for t in conduction_stiffness(&bars, k) {
+            if t.row != t.col {
+                triplets.push(Triplet::new(t.col, t.row, t.val));
+            }
+            triplets.push(t);
+        }
+        let mut doublets: Doublets = Vec::new();
+        for ((temperature, multiplier), td) in ends.iter().zip(&multipliers).zip([0.0, 1.0]) {
+            let (gt, gd) = temperature_lagrangian(temperature, multiplier, |_| td).unwrap();
+            for d in &gd {
+                doublets.push(*d);
+            }
+            for t in &gt {
+                triplets.push(Triplet::new(t.row, t.col, t.val));
+                triplets.push(Triplet::new(t.col, t.row, t.val));
+            }
+        }
+
+        let a = SparseColMat::<usize, f64>::try_new_from_triplets(5, 5, &triplets).unwrap();
+        let f = try_new_from_doublet(5, &doublets).unwrap();
+        let d = a.sp_lu().unwrap().solve(&f);
+
+        assert!(close(d[0], 0.0));
+        assert!(close(d[1], 0.5));
+        assert!(close(d[2], 1.0));
+        assert!(close(d[3], 0.5));
+        assert!(close(d[4], -0.5));
+        assert!(close(d[3] + d[4], 0.0));
     }
 
     #[test]

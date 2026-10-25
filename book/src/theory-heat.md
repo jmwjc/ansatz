@@ -69,7 +69,7 @@ $$
 T(x, t) = T_D(x, t), \qquad x \in \Gamma_D
 $$
 
-这是**本质边界条件**：直接约束试探空间，离散后必须显式强加（罚函数法或消元法），否则刚度矩阵奇异。物理上对应"边界与恒温热源接触"。
+这是**本质边界条件**：直接约束试探空间，离散后必须显式强加（罚函数法或消元法），否则刚度矩阵奇异。物理上对应"边界与恒温热源接触"。两种强加方式的完整理论见「边界条件与罚函数法」章与本章 §6（拉格朗日乘子法）。
 
 ### 2.3 第二类：Neumann（热通量给定）
 
@@ -246,7 +246,215 @@ $$
 
 常数 $C_1, C_2$ 由边界条件确定。例如左端定温 $T(0) = T_L$、右端对流 $-k\,T'(L) = h\big(T(L)-T_\infty\big)$，可解出闭式解作为算例验证基准——其结构与「拉压杆的力学模型」中 $u(x) = -\frac{f}{2EA}x^2 + \cdots$ 完全一致。
 
-## 6. 与 ansatz 抽象的对应
+## 6. 本质边界条件的强加：拉格朗日乘子法
+
+### 为什么另起一套做法
+
+§2.2 的 Dirichlet 条件 $T = T_D$ 在离散后必须**显式强加**。库当前采用罚函数法（「边界条件与罚函数法」章），以"近似满足 + 需调参 $\alpha$"为代价换取矩阵对称正定。热传导问题还有一个更"数学正确"的选择：**拉格朗日乘子法**——它把本质条件当作**等式约束**用乘子精确施加，并且**顺带给出 Dirichlet 边界上的热流**。热工程中 $q_n$ 往往正是最关心的输出（散热功率、热流密度分布），所以这一优点在热问题上比在弹性力学中更突出。
+
+### 约束问题与 Lagrangian
+
+记
+
+$$
+a(T,v) = \int_\Omega k\,\nabla T\cdot\nabla v\,d\Omega + \int_{\Gamma_R} h\,T\,v\,d\Gamma,\qquad
+l(v) = \int_\Omega Q\,v\,d\Omega - \int_{\Gamma_N} q_n\,v\,d\Gamma + \int_{\Gamma_R} h\,T_\infty\,v\,d\Gamma
+$$
+
+（稳态情形；瞬态时 $a$ 还需加质量项，见"瞬态：半离散 DAE"）。试探空间与检验空间为
+
+$$
+V_D = \bigl\{T \in H^1(\Omega) : T = T_D \ \text{on}\ \Gamma_D\bigr\},\qquad
+V_0 = \bigl\{v \in H^1(\Omega) : v = 0 \ \text{on}\ \Gamma_D\bigr\},
+$$
+
+弱形式（§3）即
+
+$$
+\text{求 } T \in V_D:\quad a(T,v) = l(v),\qquad \forall v \in V_0 .
+$$
+
+这等价于能量泛函 $\Pi(T) = \tfrac12 a(T,T) - l(T)$ 在**仿射流形** $V_D$ 上取极小。把"$T = T_D$ on $\Gamma_D$"看成等式约束、引入乘子 $\lambda \in \Lambda = L^2(\Gamma_D)$，构造 **Lagrangian**
+
+$$
+\mathcal{L}(T,\lambda) = \Pi(T) + \int_{\Gamma_D}\lambda\,\bigl(T - T_D\bigr)\,d\Gamma .
+$$
+
+鞍点条件（分别对 $T$ 与 $\lambda$ 取变分）给出
+
+$$
+\begin{cases}
+ a(T,v) + \displaystyle\int_{\Gamma_D}\lambda\,v\,d\Gamma = l(v), & \forall v \in V,\\[2mm]
+ \displaystyle\int_{\Gamma_D}\mu\,\bigl(T - T_D\bigr)\,d\Gamma = 0, & \forall \mu \in \Lambda .
+\end{cases}
+$$
+
+第一个方程的检验空间从 $V_0$ **放宽**到 $V$：约束被"搬进"方程，$v$ 在 $\Gamma_D$ 上不再要求为零，代价是多出一个未知场 $\lambda$。
+
+### 乘子的物理意义
+
+对照原始弱形式中的边界项 $\int_{\partial\Omega} v\,k\frac{\partial T}{\partial n}d\Gamma$ 与上式多出的 $\int_{\Gamma_D}\lambda\,v\,d\Gamma$，可见
+
+$$
+\lambda = -k\frac{\partial T}{\partial n}\bigg|_{\Gamma_D} = q_n\big|_{\Gamma_D} ,
+$$
+
+即**乘子就是 Dirichlet 边界上未知的向外热流**，符号与 §2.3 的约定（向外为正）一致。这一点很实用：罚函数法只能用 $\alpha(T_h - T_D)$ 事后近似这个量，而乘子法是它的直接解。
+
+### 离散：鞍点系统
+
+取 $T_h = \sum_j T_j N_j$，乘子用 $\Gamma_D$ 上的**迹空间**离散：
+
+$$
+\lambda_h = \sum_{a} \lambda_a \, N_a\big|_{\Gamma_D},
+$$
+
+自由度取在 $\Gamma_D$ 的边界节点上（与 $T_h$ 的节点自由度一一对应）。记
+
+$$
+G_{aj} = \int_{\Gamma_D} N_a N_j\,d\Gamma,\qquad
+g_a = \int_{\Gamma_D} N_a T_D\,d\Gamma ,
+$$
+
+$G$ 只在 $\Gamma_D$ 的边界节点间非零，是**边界质量矩阵**：一侧耦合边界节点与相邻内部节点（$G_{aj}$，$j \notin \Gamma_D$），另一侧给出边界节点自身的边界质量矩阵块（$G_{ab}$，$a,b \in \Gamma_D$，对称正定）。$F_j = l(N_j)$。离散鞍点系统为
+
+$$
+\begin{bmatrix} K & G^{\mathsf T} \\ G & 0 \end{bmatrix}
+\begin{bmatrix} \mathbf T \\ \boldsymbol\lambda \end{bmatrix}
+=
+\begin{bmatrix} \mathbf F \\ \mathbf g \end{bmatrix},
+$$
+
+其中 $K$ 泛指空间算子矩阵（含 Robin 刚度）。按自由节点 $F$ 与约束节点 $D$（$\Gamma_D$ 上的节点）分块，并把已知的 $\mathbf T_D$ 移到右端：
+
+$$
+\begin{bmatrix} K_{FF} & G_F^{\mathsf T} \\ G_F & 0 \end{bmatrix}
+\begin{bmatrix} \mathbf T_F \\ \boldsymbol\lambda \end{bmatrix}
+=
+\begin{bmatrix} \mathbf F_F - K_{FD}\mathbf T_D \\ \mathbf g - G_D\mathbf T_D \end{bmatrix}.
+$$
+
+要点：
+
+- **无需罚数**：约束不是"近似满足"，因此不存在 $\alpha$ 取小则约束不满足、取大则病态的两难；
+- **约束行是积分意义的**：$\int_{\Gamma_D} N_a (T_h - T_D)\,d\Gamma = 0$ 即 $G(\mathbf T - \mathbf T_D) = \mathbf 0$。因 $G_D$ 是边界质量矩阵（可逆），它蕴含 $T_h|_{\Gamma_D} = I_h T_D$ **逐节点精确成立**（$I_h$ 为节点插值）；
+- **矩阵对称但不定**：对角块为零、鞍点结构，**不能**用 Cholesky，需带主元的稀疏 $LDL^{\mathsf T}$ / LU（`faer` 的稀疏 LU），这是与罚函数法（保持对称正定、可走 `sp_cholesky`）的根本差别；
+- 额外未知数只在 $\Gamma_D$ 上，规模远小于总自由度，通常不是瓶颈。
+
+### 乘子空间的选取与混合离散
+
+以上取乘子为 $T_h$ 的**迹空间**（$\lambda_h$ 与 $T_h$ 共用边界节点），此时 $G$ 是方形的边界质量矩阵、约束逐点成立。乘子空间其实可以不同：只要 $\lambda$ 与 $T$ 使用**同一套积分单元与积分点**（同一几何、同一参数域 $\xi$），形函数算法可以各自独立。常见搭配：
+
+| $\lambda$ 空间 | $G$ 的形状 | 约束的含义 | 备注 |
+|---|---|---|---|
+| $T_h$ 的迹空间（等阶） | $N\times N$ 方阵，即边界质量矩阵 | 逐节点精确 $T_h = I_h T_D$ | 最常用，$G_D$ 可逆 |
+| 每个边界单元一个常值（$P_0$） | 长方形 $N_e \times N$ | 积分平均 $\int_e (T_h - T_D)\,d\Gamma = 0$ | 自由度更少，只"弱"满足；适合复杂几何或要与其它耦合场匹配时 |
+| 高于 $T_h$ 的迹空间 | 行数更多（超定） | —— | 通常破坏 inf-sup，不建议 |
+
+要点：混合离散下 $G$ 不再是方阵，$G\mathbf T = \mathbf g$ 的行数（乘子自由度）可以多于或少于约束节点数；可解性由离散 inf-sup 条件保证——等阶与"每个边界单元一个常数"两种常见搭配都满足（$G$ 行满秩），而比 $T_h$ 迹空间更粗或更细的乘子都需要单独检查。实现上只需分别给出 $T$ 与 $\lambda$ 的形函数在共享积分点处的取值，因此 `ansatz` 的 `temperature_lagrangian` 接收**两组边界单元**（配对迭代，几何、积分规则取温度单元，乘子单元只提供形函数与自由度编号），并返回**完整**的耦合块 $G$（$M\times N$ 全部元素）与 $\mathbf g$，因为 $G$ 位于鞍点系统的非对角块，不能按对称三角存储。
+
+### Schur 补与静力凝聚
+
+由第一个块行解出 $\mathbf T_F$ 再代入约束行，得关于乘子的**对偶（Schur 补）系统**：
+
+$$
+S\,\boldsymbol\lambda = G_F K_{FF}^{-1}\bigl(\mathbf F_F - K_{FD}\mathbf T_D\bigr) - \bigl(\mathbf g - G_D\mathbf T_D\bigr),
+\qquad S = G_F K_{FF}^{-1} G_F^{\mathsf T} .
+$$
+
+$S$ 对称半正定，$G_F$ 列满秩时正定，故乘子方程本身可用共轭梯度；但每次矩阵-向量乘都要解一次 $K_{FF}$，因此
+
+- 只需解一次（稳态）：直接解鞍点系统（稀疏 LU）最省事；
+- 需反复求解（瞬态、非线性）：预分解 $K_{FF}$，再在乘子空间上迭代（Uzawa / 对偶迭代），可把 $\Gamma_D$ 上的小规模求解与内部大规模求解解耦。
+
+### 瞬态：半离散 DAE
+
+瞬态时约束在**每一时刻**都成立，而质量矩阵在约束方向上为零（温度值被强制给定，不能演化），故半离散系统是**指标 2 的微分代数方程（DAE）**：
+
+$$
+\begin{bmatrix} M_{FF} & 0 \\ 0 & 0 \end{bmatrix}
+\begin{bmatrix} \dot{\mathbf T}_F \\ \dot{\boldsymbol\lambda} \end{bmatrix}
++
+\begin{bmatrix} K_{FF} & G_F^{\mathsf T} \\ G_F & 0 \end{bmatrix}
+\begin{bmatrix} \mathbf T_F \\ \boldsymbol\lambda \end{bmatrix}
+=
+\begin{bmatrix} \mathbf F_F - K_{FD}\mathbf T_D \\ \mathbf g - G_D\mathbf T_D \end{bmatrix}.
+$$
+
+第二块行没有时间导数：$\boldsymbol\lambda$ 不参与时间推进，只是每个时刻的"瞬时反力"（边界热流）。θ 方法只作用在第一个块行上。以 $\theta = 1$（后向欧拉）为例，每步求解
+
+$$
+\begin{bmatrix} \dfrac{M_{FF}}{\Delta t} + K_{FF} & G_F^{\mathsf T} \\[1mm] G_F & 0 \end{bmatrix}
+\begin{bmatrix} \mathbf T_F^{n+1} \\ \boldsymbol\lambda^{n+1} \end{bmatrix}
+=
+\begin{bmatrix} \dfrac{M_{FF}}{\Delta t}\mathbf T_F^{n} + \mathbf F_F^{n+1} - K_{FD}\mathbf T_D^{n+1} \\[1mm] \mathbf g^{n+1} - G_D\mathbf T_D^{n+1} \end{bmatrix}.
+$$
+
+一般 $\theta$ 的情形把惯性项写成残差形式更清楚：对第一个块行要求
+
+$$
+\frac{M_{FF}}{\Delta t}\bigl(\mathbf T_F^{n+1} - \mathbf T_F^{n}\bigr)
++ \theta\,\mathbf r^{n+1} + (1-\theta)\,\mathbf r^{n} = \mathbf 0,\qquad
+\mathbf r^{n} \coloneqq K_{FF}\mathbf T_F^{n} + G_F^{\mathsf T}\boldsymbol\lambda^{n} + K_{FD}\mathbf T_D^{n} - \mathbf F_F^{n},
+$$
+
+即每步求解
+
+$$
+\begin{bmatrix} \dfrac{M_{FF}}{\Delta t} + \theta K_{FF} & \theta G_F^{\mathsf T} \\[1mm] G_F & 0 \end{bmatrix}
+\begin{bmatrix} \mathbf T_F^{n+1} \\ \boldsymbol\lambda^{n+1} \end{bmatrix}
+=
+\begin{bmatrix} \dfrac{M_{FF}}{\Delta t}\mathbf T_F^{n} - (1-\theta)\bigl(K_{FF}\mathbf T_F^{n} + G_F^{\mathsf T}\boldsymbol\lambda^{n} + K_{FD}\mathbf T_D^{n} - \mathbf F_F^{n}\bigr) + \theta\mathbf F_F^{n+1} - \theta K_{FD}\mathbf T_D^{n+1} \\[1mm] \mathbf g^{n+1} - G_D\mathbf T_D^{n+1} \end{bmatrix}.
+$$
+
+注意两点：
+
+1. 右端出现 $\boldsymbol\lambda^{n}$ **不是**乘子被"积分"——乘子始终是代数量（约束瞬时成立），只是 θ 加权需要上一时刻的完整残差；若取 $\theta = 1$ 该项消失，无需保存历史乘子；
+2. $\theta \ne 1$ 时耦合块为 $\theta G_F^{\mathsf T}$，矩阵不再严格对称；把乘子重新标度 $\tilde{\boldsymbol\lambda} = \theta\boldsymbol\lambda$ 可恢复到 $[M/\Delta t + \theta K_{FF},\ G_F^{\mathsf T};\ G_F,\ 0]$ 的对称形式（右端相应变为 $\tilde{\boldsymbol\lambda}^{n}/\theta$），否则直接用稀疏 LU。工程上常见做法是瞬态用拉格朗日乘子（$\theta = 1$、一阶但无条件稳定），而 Crank–Nicolson 配合罚函数法或消元法。
+
+### 适定性与 inf-sup 条件
+
+乘子空间不能随意取。离散鞍点问题的可解性要求**离散 inf-sup（LBB）条件**：
+
+$$
+\inf_{\mu_h \in \Lambda_h}\ \sup_{v_h \in V_h}
+\frac{\int_{\Gamma_D}\mu_h\,v_h\,d\Gamma}{\lVert v_h \rVert_{1} \lVert \mu_h \rVert_{0,\Gamma_D}} \ge \beta > 0 .
+$$
+
+本节"乘子取 $T_h$ 在 $\Gamma_D$ 上的迹空间"的做法满足该条件：约束块 $G_D$ 就是边界质量矩阵，在乘子空间上强制正定。相比之下，若在同一节点上放多个乘子、或乘子自由度多于约束所能分辨的模态，$G_D$ 奇异、鞍点系统不可解。
+
+**退化情形**：当 $\Gamma_D$ 退化为孤立节点（`Poi1` 点单元，例如 2D 中只固定一个角点的温度），迹空间维数就是节点数，$G$ 退化为单位阵，$\lambda_a$ 变为该节点的**总热流**（单位 W，而非 W/m²）。
+
+### 与罚函数法的关系
+
+罚函数法可以看成把乘子**消去**后的正则化版本。在 Lagrangian 上加罚项得**增广拉格朗日**
+
+$$
+\mathcal{L}_\alpha(T,\lambda) = \mathcal{L}(T,\lambda) + \frac{\alpha}{2}\int_{\Gamma_D}\bigl(T - T_D\bigr)^2 d\Gamma ,
+$$
+
+若在乘子上做 Uzawa 迭代 $\lambda \leftarrow \lambda + \alpha(T - T_D)$，就是把精确约束逐步"罚"出来的乘子实现。经典罚函数法相当于只做一次、把乘子初值取零并**丢弃乘子**：它的罚刚度项 $\alpha\int_{\Gamma_D} N_i N_j\,d\Gamma$ 与罚载荷项 $\alpha\int_{\Gamma_D} N_i T_D\,d\Gamma$ 正是本节 $G$ 与 $\mathbf g$ 的 $\alpha$ 倍，即
+
+$$
+K \;\longrightarrow\; K + \alpha G,\qquad \mathbf F \;\longrightarrow\; \mathbf F + \alpha\mathbf g
+$$
+
+（只改 $D$ 相关行列）。因此 $\alpha \to \infty$ 时罚函数解收敛到鞍点解的 $\mathbf T$ 部分，而 $\alpha(T_h - T_D) \to \lambda$。这解释了两点工程经验：
+
+- 罚函数法**没有**额外的约束精度控制手段，只能靠加大 $\alpha$，且以条件数为代价；
+- 想直接得到边界热流，用拉格朗日乘子法更干净；若已用罚函数法，反力 $\alpha(T_h - T_D)$ 精度较差，更可靠的做法是用能量（热平衡）校验来反推总热流。
+
+### 能量（热平衡）校验
+
+无论用哪种方法，稳态解都应满足全局热平衡。稳态时取 $v \equiv 1$：
+
+$$
+\sum_{a} \lambda_a = \int_\Omega Q\,d\Omega - \int_{\Gamma_N} q_n\,d\Gamma + \int_{\Gamma_R} h\bigl(T_\infty - T\bigr)\,d\Gamma ,
+$$
+
+即"净产热扣除 Neumann 与 Robin 的流出后，剩下的全部经 Dirichlet 边界流出"。这条恒等式既是拉格朗日乘子法算例的现成单元测试断言，也是罚函数法结果的自检手段（用 $K\mathbf T - \mathbf F$ 在约束节点上的残差近似 $\lambda$）。
+
+## 7. 与 ansatz 抽象的对应
 
 热传导完全复用现有抽象（`Element`、`Variable`、`IntegrationScheme`），只需新增一组热算子。参照 `src/operation/bar.rs` 的四个函数：
 
@@ -256,6 +464,7 @@ $$
 | `body_force(v, f)` | `heat_source(v, Q)` | $F_i = \sum_g Q\,N_i\,|J|\,w_g$ |
 | `traction(v, p)` | `heat_flux(v, q_n)` | $F_i = -\int_{\Gamma_N} N_i\, q_n\, d\Gamma$（注意符号，沿边界积分） |
 | `displacement_penalty(v, α, ū)` | `temperature_penalty(v, α, T_D)` | 罚函数强加定温（沿边界积分） |
+| —（已实现） | `temperature_lagrangian(T, λ, T_D)` | 拉格朗日乘子：返回完整耦合块 $G_{aj} = \int_{\Gamma_D} \Lambda_a N_j\,d\Gamma$（$M\times N$ 全部元素）与 $g_a = \int_{\Gamma_D} \Lambda_a T_D\,d\Gamma$；$T$ 与 $\lambda$ 可用不同形函数，需解鞍点系统（见 §6） |
 | —（新增） | `convection(v, h, T_∞)` | Robin 项：刚度 $h\int N_i N_j\,d\Gamma$ + 载荷 $h T_\infty\int N_i\,d\Gamma$（沿边界积分） |
 | —（新增） | `capacity(v, ρc_p)` | 质量矩阵 $M_{ij} = \sum_g \rho c_p N_i N_j\,|J|\,w_g$ |
 
@@ -263,7 +472,8 @@ $$
 
 - `conduction_stiffness` 与 `stiffness` 仅差一个系数（$k$ 代替 $ea$）：二者都计算物理梯度 $\nabla_x N$ 的点积 $\nabla N_i \cdot \nabla N_j$（`derivative_shape` 现返回关于物理坐标的完整梯度），线单元上 $\nabla_x N = \pm \hat t/L$ 沿切向，退化为 $dN_i/dx \cdot dN_j/dx$；
 - `heat_flux` 与 `traction` 的差别是**符号**：Neumann 通量 $q_n$ 进入载荷时带负号（$-\int N_i q_n\,d\Gamma$），源自约定 $k\frac{\partial T}{\partial n} = -q_n$；二者均作用于任意维度的边界单元（`Poi1` 点单元退化为集中通量）；
-- 温度 Dirichlet 条件用**罚函数法**，与 `displacement_penalty` 完全同构：对任意维度边界单元生成 $K_{ij} \mathrel{+}= \alpha\int N_i N_j\,d\Gamma$、$F_i \mathrel{+}= \alpha\int N_i T_D\,d\Gamma$（`Poi1` 点单元退化为 $K_{ii}\mathrel{+}=\alpha$、$F_i\mathrel{+}=\alpha T_D$；见「边界条件与罚函数法」章）。
+- 温度 Dirichlet 条件用**罚函数法**，与 `displacement_penalty` 完全同构：对任意维度边界单元生成 $K_{ij} \mathrel{+}= \alpha\int N_i N_j\,d\Gamma$、$F_i \mathrel{+}= \alpha\int N_i T_D\,d\Gamma$（`Poi1` 点单元退化为 $K_{ii}\mathrel{+}=\alpha$、$F_i\mathrel{+}=\alpha T_D$；见「边界条件与罚函数法」章）；
+- 若要**精确**满足定温约束并直接输出 Dirichlet 边界热流 $\lambda = q_n|_{\Gamma_D}$，则改用 §6 的拉格朗日乘子法：`temperature_lagrangian(&T, &λ, T_D)` 组装耦合块 $G_{aj} = \int_{\Gamma_D} \Lambda_a N_j\,d\Gamma$ 与 $g_a = \int_{\Gamma_D} \Lambda_a T_D\,d\Gamma$（两组边界单元配对迭代：积分单元/积分点/雅可比取温度单元，乘子单元只提供形函数与自由度 id；传同一个集合即得边界质量矩阵）。它返回**完整**的 $G$ 而非下三角，转置块 $G^{\mathsf T}$ 由行列互换得到；求解器须支持对称不定系统（`sp_lu` 稀疏 LU / $LDL^{\mathsf T}$），不能走当前的 `sp_cholesky` 链路；且 LU 读取整矩阵，故 `conduction_stiffness` 等返回的下三角三元组也须先对称展开。两组单元数量不一致时返回 `VariableError::ElementCountMismatch`。
 
 ### 实现要点
 
