@@ -1,18 +1,23 @@
-//! CR on tetrahedra: the interior element [`CRTet4`] and its boundary trace
+//! Crouzeix–Raviart (CR) elements on tetrahedra: [`CRTet4`] and its boundary trace
 //! [`CRTri4`].
 //!
-//! The CR tetrahedron keeps the piecewise-linear local space of [`Tet4`] but moves the
-//! degrees of freedom from the vertices to the **face averages**: the dof attached to
-//! face `f` is `(1/|f|) ∫_f v dA`, which for a linear function equals its value at the
-//! face centroid. Basis functions are `θₐ = 1 − 3λₐ`, so `∫_{f_b} θₐ dA = |f_b| δ_ab`.
+//! The 3D counterpart of [`crate::element::crtri3`]; see that module for the CR family
+//! overview (facet averages, non-interpolatory basis, `H¹` nonconformity, naming) and
+//! `book/src/theory-cr.md` for the theory.
+//!
+//! The CR tetrahedron keeps the piecewise-linear local space of
+//! [`crate::element::tet4::Tet4`] but moves the degrees of freedom from the vertices to
+//! the **face averages**: the dof attached to face `f` is `(1/|f|) ∫_f v dA`, which for
+//! a linear function equals its value at the face centroid. Basis functions are
+//! `θₐ = 1 − 3λₐ`, so `∫_{f_b} θₐ dA = |f_b| δ_ab`.
 //!
 //! Unlike the 2D case the mass matrix is **not** diagonal: `M_aa = 2|T|/5` and
 //! `M_ab = −|T|/20` (`a ≠ b`).
 //!
 //! Global numbering: the dofs belong to **faces**, not to mesh vertices, so a global
-//! face table is needed; [`CRTet4::from_tet4`] builds the element from a [`Tet4`] plus a
-//! face-id lookup. Boundary conditions use [`CRTri4`], the trace on one face, whose
-//! dofs are the parent's four face dofs.
+//! face table is needed; [`CRTet4::from_tet4`] builds the element from a
+//! [`crate::element::tet4::Tet4`] plus a face-id lookup. Boundary conditions use
+//! [`CRTri4`], the trace on one face, whose dofs are the parent's four face dofs.
 
 use std::convert::Infallible;
 
@@ -26,10 +31,10 @@ use crate::node::Node;
 
 /// Crouzeix–Raviart nonconforming linear tetrahedron.
 ///
-/// The 3D counterpart of [`crate::element::cr::CRTri3`]: the dofs are the **face averages**, which for a
+/// The 3D counterpart of [`crate::element::crtri3::CRTri3`]: the dofs are the **face averages**, which for a
 /// linear function are the values at the face centroids. `nodes[a]` is the centroid of
 /// the face opposite vertex `a` and carries the global id of that face's dof, exactly
-/// as [`crate::element::cr::CRTri3`] stores edge midpoints. Basis functions are
+/// as [`crate::element::crtri3::CRTri3`] stores edge midpoints. Basis functions are
 ///
 /// `θₐ = 1 − 3λₐ`,  so `∫_{f_b} θₐ dA = |f_b| δ_ab`,
 ///
@@ -44,7 +49,7 @@ use crate::node::Node;
 ///
 /// Global face numbering is the caller's business (a tetrahedron has four faces, each
 /// shared by two elements); [`CRTet4::from_vertices`] builds the element from four
-/// corner nodes plus a face-id lookup, and [`crate::element::cr::CRSeg3`]/[`CRTri4`] consume the same ids
+/// corner nodes plus a face-id lookup, and [`crate::element::crtri3::CRSeg3`]/[`CRTri4`] consume the same ids
 /// for boundary conditions. See `book/src/theory-cr.md` for the theory.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CRTet4<const D: usize> {
@@ -313,7 +318,7 @@ impl<const D: usize> Element<D, 3, 4> for CRTet4<D> {
 
 /// Trace of a CR tetrahedron on one of its four facets: the CR boundary triangle.
 ///
-/// This is the 3D counterpart of [`crate::element::cr::CRSeg3`]: the dofs are the **four** facet dofs of
+/// This is the 3D counterpart of [`crate::element::crtri3::CRSeg3`]: the dofs are the **four** facet dofs of
 /// the parent tetrahedron (a CR tetrahedron has no vertex dofs), the shape functions
 /// are the restrictions `θₐ|face = 1 − 3λₐ`, and `facet = k` again means "the facet
 /// opposite parent vertex `k`", with the facet's vertices listed in ascending parent

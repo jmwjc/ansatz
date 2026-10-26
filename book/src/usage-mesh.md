@@ -142,7 +142,7 @@ CR 单元的自由度挂在**边**上，GMSH 只给出三角形的顶点，所�
 `GmshOptions::edges`（**读取时**就把边编号建好）。打开该选项后即可直接取到 CR 单元：
 
 ```rust
-use ansatz::element::cr::CRTri3;
+use ansatz::element::crtri3::CRTri3;
 use ansatz::io::gmsh::{GmshOptions, read_gmsh_with};
 
 let mesh = read_gmsh_with::<2>(
@@ -208,7 +208,7 @@ CR 的自由度离散的是与顶点场**不同的未知量**，所以边编号�
 CR 的边界条件不能用 `Seg2`：`Seg2` 的自由度是顶点值，而 CR 在边上的迹由相邻三角形的**三个**边自由度决定。读取器把边界线段与其所属三角形配对，返回 `CRSeg3<D>`（迹单元）：
 
 ```rust
-use ansatz::element::cr::CRSeg3;
+use ansatz::element::crtri3::CRSeg3;
 use ansatz::io::gmsh::{GmshOptions, read_gmsh_with};
 
 let mesh = read_gmsh_with::<2>(
@@ -237,7 +237,7 @@ let boundary: Vec<CRSeg3<2>> = mesh.crtri3_boundary("Γᵈ")?;
 三维的配套是 `Tet4` → `CRTet4`（内部）与 `CRTri4`（边界迹），对应预处理开关是 `faces`：
 
 ```rust
-use ansatz::element::cr::{CRSeg3, CRTet4, CRTri4};
+use ansatz::element::crtet4::{CRTet4, CRTri4};
 use ansatz::io::gmsh::{GmshOptions, read_gmsh_with};
 
 let mesh = read_gmsh_with::<3>(

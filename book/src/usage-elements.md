@@ -105,7 +105,7 @@ $$
 
 ```rust
 use std::collections::HashMap;
-use ansatz::element::cr::CRTri3;
+use ansatz::element::crtri3::CRTri3;
 
 let n_vertices = 3;
 let mut edges: HashMap<(usize, usize), usize> = HashMap::new();

@@ -2,7 +2,7 @@
 
 前面各章的单元（`Seg2`、`Tri3`、`Quad4`）都是**协调**（conforming）单元：相邻单元在公共边界上逐点连续，因而全局空间是 $H^1$ 的子空间，可以直接套用伽辽金理论。CR 单元（Crouzeix & Raviart, 1973）主动**放弃逐点连续**，只保留公共边界上的**积分平均连续**。它用极小的代价换来两个重要特性：一个好的不可压缩（Stokes/近不可压弹性）速度空间，以及**对角的质量矩阵**。
 
-> 实现：`ansatz::element::cr::CRTri3<D>`（其中一个自由度 = 一条边的平均值），边界条件用 `CRSeg3<D>` 迹单元；见末节「与 ansatz 抽象的对应」。
+> 实现：`ansatz::element::crtri3::CRTri3<D>`（其中一个自由度 = 一条边的平均值），边界条件用 `CRSeg3<D>` 迹单元；见末节「与 ansatz 抽象的对应」。
 
 ## 1. 动机：为什么放弃协调性
 
@@ -244,7 +244,7 @@ CR 单元可以直接塞进现有的 `Element` / `Variable` / `IntegrationScheme
 
 ### 单元类型
 
-`ansatz::element::cr::CRTri3<D>` 实现 `Element<D, 2, 3>`：参数维 $P=2$、基函数个数 $N=3$，与 `Tri3` 相同，差别只在形函数、其梯度以及"节点"的含义（三个边中点）：
+`ansatz::element::crtri3::CRTri3<D>` 实现 `Element<D, 2, 3>`：参数维 $P=2$、基函数个数 $N=3$，与 `Tri3` 相同，差别只在形函数、其梯度以及"节点"的含义（三个边中点）：
 
 ```rust
 // 参考三角形 (0,0), (1,0), (0,1)：面积坐标 λ = [1 - ξ - η, ξ, η]
@@ -271,7 +271,7 @@ $\sum_i\theta_i M_i$ 计算，结果与 $\sum_i\lambda_i A_i$ 相同。
 因此构造 CR 单元的核心是**给每条边分配唯一 id**。`CRTri3::from_tri3(&tri, edge_id)` 为此而设：`edge_id(a, b)` 接收一条边的两个端点顶点 id（升序），返回该边的全局自由度编号。GMSH 网格的读取链路已封装好这一步：
 
 ```rust
-use ansatz::element::cr::CRTri3;
+use ansatz::element::crtri3::CRTri3;
 use ansatz::io::gmsh::{GmshOptions, read_gmsh_with};
 
 let mesh = read_gmsh_with::<2>(

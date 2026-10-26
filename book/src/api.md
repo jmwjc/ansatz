@@ -27,10 +27,10 @@
 
 - `element::seg2::Seg2<D>`：`new(n1, n2)`，2 节点线单元；
 - `element::tri3::Tri3<D>`：`new(n1, n2, n3)`，3 节点三角形；
-- `element::cr::CRTri3<D>`：`new(m1, m2, m3)`（三个边中点）、`from_tri3(&tri, edge_id)`、`triangle_vertices()`，Crouzeix–Raviart 非协调线性三角形；
+- `element::crtri3::CRTri3<D>`：`new(m1, m2, m3)`（三个边中点）、`from_tri3(&tri, edge_id)`、`triangle_vertices()`，Crouzeix–Raviart 非协调线性三角形；
 - `element::tet4::Tet4<D>`：`new(n1..n4)`、`volume()`，4 节点线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`，`FromGmsh` 类型 4）；
-- `element::cr::CRTet4<D>`：`new(f1..f4)`（四个面重心）、`from_tet4(&Tet4, face_id)`、`from_vertices([Node;4], face_id)`（及对应的 `try_*`）、`tetrahedron_vertices()`、`volume()`，CR 非协调线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`）；
-- `element::cr::CRSeg3<D>` / `element::cr::CRTri4<D>`：CR 的 facet 迹单元（2D 线段 / 3D 三角形），`new(facets, parent_vertices, facet)`、`CRSeg3::from_crtri3(&parent, facet)`、`CRTri4::from_crtet4(&parent, facet)`、`local_facet()`、`facet_vertices()`、`parent_vertices()`，用于边界条件；
+- `element::crtet4::CRTet4<D>`：`new(f1..f4)`（四个面重心）、`from_tet4(&Tet4, face_id)`、`from_vertices([Node;4], face_id)`（及对应的 `try_*`）、`tetrahedron_vertices()`、`volume()`，CR 非协调线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`）；
+- `element::crtri3::CRSeg3<D>` / `element::crtet4::CRTri4<D>`：CR 的 facet 迹单元（2D 线段 / 3D 三角形），`new(facets, parent_vertices, facet)`、`CRSeg3::from_crtri3(&parent, facet)`、`CRTri4::from_crtet4(&parent, facet)`、`local_facet()`、`facet_vertices()`、`parent_vertices()`，用于边界条件；
 - `element::quad4::Quad4<D>`：`new(n1, n2, n3, n4)`，4 节点四边形；
 - `element::poi1::Poi1<D>`：`new(node)`，1 节点点单元。
 

@@ -11,17 +11,17 @@
 
 ### Added
 
-- `element::cr::CRTri3<D>`：Crouzeix–Raviart 非协调线性三角形，实现 `Element<D, 2, 3>`，
+- `element::crtri3::CRTri3<D>`：Crouzeix–Raviart 非协调线性三角形，实现 `Element<D, 2, 3>`，
   自由度为三条边的平均值（基函数 `θᵢ = 1 − 2λᵢ`），2D 质量矩阵恰好对角 `(|T|/3) I`；
   `CRTri3::from_tri3(&tri, edge_id)` 由 `Tri3` 与"边 → 自由度"闭包构造（节点为边中点，
   `triangle_vertices()` 反射取回真实顶点），`FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`；
 - `element::tet4::Tet4<D>`：4 节点线性（协调）四面体，实现 `Element<D, 3, 4>`、`FromGmsh`
   （GMSH 类型 4），`volume()`、`FullIntegration<3, 4>` / `ReducedIntegration<3, 1>`；
-- `element::cr::CRTet4<D>`：Crouzeix–Raviart 非协调线性四面体，实现 `Element<D, 3, 4>`，
+- `element::crtet4::CRTet4<D>`：Crouzeix–Raviart 非协调线性四面体，实现 `Element<D, 3, 4>`，
   自由度为四个面的平均值（`θₐ = 1 − 3λₐ`），几何由面重心按 `ΣθₐCₐ = ΣλₐAₐ` 精确重现
   （`tetrahedron_vertices()` 反射取回顶点），质量为非对角（`2|T|/5` / `−|T|/20`，
   需 `FullIntegration<3, 4>`），`from_vertices([Node;4], face_id)` 由角点与"面 → 自由度"闭包构造；
-- `element::cr::CRSeg3<D>` / `element::cr::CRTri4<D>`：CR 单元的 facet 迹单元（`CRSeg3` 为 2D 三角形的线段
+- `element::crtri3::CRSeg3<D>` / `element::crtet4::CRTri4<D>`：CR 单元的 facet 迹单元（`CRSeg3` 为 2D 三角形的线段
   facet、3 个自由度；`CRTri4` 为 3D 四面体的三角 facet、4 个自由度）。自由度为父单元的全部 facet 自由度
   （`id() == 父单元 id()`），形函数为 `θₐ|facet`（2D：`shape[facet]=1`、`shape[lo]=ξ`、
   `shape[hi]=−ξ`），几何取 facet 顶点构成的 `Seg2`/`Tri3`（非等参，`jacobe = L/2` / `2×面积`）。

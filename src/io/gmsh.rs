@@ -6,7 +6,8 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use crate::element::Element;
-use crate::element::cr::{CRSeg3, CRTet4, CRTri3, CRTri4};
+use crate::element::crtet4::{CRTet4, CRTri4};
+use crate::element::crtri3::{CRSeg3, CRTri3};
 use crate::element::poi1::Poi1;
 use crate::element::quad4::Quad4;
 use crate::element::seg2::Seg2;
@@ -1314,7 +1315,7 @@ pub struct GmshOptions {
 ///
 /// Node ids are the raw GMSH ones (`tag - 1`) and no edge numbering is built; use
 /// [`read_gmsh_with`] to enable the preprocessing steps of [`GmshOptions`] (dense
-/// node renumbering, edge numbering for [Crouzeix–Raviart](crate::element::cr::CRTri3)
+/// node renumbering, edge numbering for [Crouzeix–Raviart](crate::element::crtri3::CRTri3)
 /// elements).
 ///
 /// # Errors
