@@ -16,7 +16,9 @@
 //! assembling explicit Voigt `B`/`D` matrices. See
 //! `book/src/theory-elasticity.md` for the underlying theory.
 
-use crate::element::{Element, FullIntegration, IntegrationScheme, ReducedIntegration};
+use crate::element::{
+    Element, ElementBase, FullIntegration, IntegrationScheme, ReducedIntegration,
+};
 use crate::operation::{
     node_coefficients, Doublets, Triplets, TripletsAndDoublets, Variable, VariableError,
 };
@@ -791,6 +793,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::element::ElementBase;
     use crate::element::poi1::Poi1;
     use crate::element::quad4::Quad4;
     use crate::element::seg2::Seg2;
@@ -1261,15 +1264,9 @@ mod tests {
         }
     }
 
-    impl<const D: usize> Element<D, 1, 1> for ConstantEdge<D> {
+    impl<const D: usize> ElementBase<D, 1, 1> for ConstantEdge<D> {
         fn id(&self) -> [usize; 1] {
             [self.dof.id]
-        }
-        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
-            [1.0]
-        }
-        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
-            [[0.0; D]; 1]
         }
         fn vertices_coordinates(&self) -> [[f64; D]; 1] {
             [self.ends[0].coordinates]
@@ -1285,6 +1282,15 @@ mod tests {
         }
         fn local_coordinates(&self, _x: [f64; D]) -> Option<[f64; 1]> {
             Some([0.0])
+        }
+    }
+
+    impl<const D: usize> Element<D, 1, 1> for ConstantEdge<D> {
+        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
+            [1.0]
+        }
+        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
+            [[0.0; D]; 1]
         }
     }
 

@@ -37,7 +37,7 @@ dependencies = [
 
 [[package]]
 name = "ansatz"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dhat",
  "faer",

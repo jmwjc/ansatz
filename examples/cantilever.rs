@@ -23,7 +23,7 @@ use plotters::style::text_anchor::{HPos, Pos, VPos};
 
 use ansatz::element::quad4::Quad4;
 use ansatz::element::seg2::Seg2;
-use ansatz::element::Element;
+use ansatz::element::{Element, ElementBase};
 use ansatz::io::gmsh::read_gmsh;
 use ansatz::operation::elasticity::{
     Lame, displacement_penalty, energy_error, l2_error, stiffness, stress, traction,

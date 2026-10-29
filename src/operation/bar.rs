@@ -1,4 +1,4 @@
-use crate::element::{Element, FullIntegration, IntegrationScheme};
+use crate::element::{Element, ElementBase, FullIntegration, IntegrationScheme};
 use crate::operation::{Doublets, Triplets, TripletsAndDoublets, Variable};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;

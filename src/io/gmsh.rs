@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::element::Element;
+use crate::element::ElementBase;
 use crate::element::crtet4::{CRTet4, CRTri4};
 use crate::element::crtri3::{CRSeg3, CRTri3};
 use crate::element::poi1::Poi1;
@@ -2016,7 +2016,7 @@ fn read_elements_v4(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::element::Element;
+    use crate::element::{Element, ElementBase};
     use std::io::Write;
 
     #[test]

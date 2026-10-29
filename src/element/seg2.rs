@@ -1,4 +1,6 @@
-use crate::element::{Element, FullIntegration, GaussLegendre1D, IntegrationScheme, ReducedIntegration};
+use crate::element::{
+    Element, ElementBase, FullIntegration, GaussLegendre1D, IntegrationScheme, ReducedIntegration,
+};
 use crate::node::Node;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -45,29 +47,9 @@ impl<const D: usize> IntegrationScheme<1, 2> for Seg2<D> {
 impl<const D: usize> ReducedIntegration<1, 1> for Seg2<D> {}
 impl<const D: usize> FullIntegration<1, 2> for Seg2<D> {}
 
-impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
+impl<const D: usize> ElementBase<D, 1, 2> for Seg2<D> {
     fn id(&self) -> [usize; 2] {
         [self.nodes[0].id, self.nodes[1].id]
-    }
-    fn shape(&self, parametric_coordinates: [f64; 1]) -> [f64; 2] {
-        let ξ = parametric_coordinates[0];
-        [0.5 * (1.0 - ξ), 0.5 * (1.0 + ξ)]
-    }
-    /// Physical gradient of the linear shape functions: `∇ₓN₁ = -(x₂-x₁)/L²`,
-    /// `∇ₓN₂ = (x₂-x₁)/L²`, i.e. `±t̂/L` where `t̂` is the unit tangent.
-    fn derivative_shape(&self, parametric_coordinates: [f64; 1]) -> [[f64; D]; 2] {
-        let l = 2.0 * self.jacobe(parametric_coordinates);
-        let l2 = l * l;
-        std::array::from_fn(|node| {
-            std::array::from_fn(|i| {
-                let t = (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i]) / l2;
-                if node == 0 {
-                    -t
-                } else {
-                    t
-                }
-            })
-        })
     }
     fn vertices_coordinates(&self) -> [[f64; D]; 2] {
         [self.nodes[0].coordinates, self.nodes[1].coordinates]
@@ -119,11 +101,33 @@ impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
     }
 }
 
+impl<const D: usize> Element<D, 1, 2> for Seg2<D> {
+    fn shape(&self, parametric_coordinates: [f64; 1]) -> [f64; 2] {
+        let ξ = parametric_coordinates[0];
+        [0.5 * (1.0 - ξ), 0.5 * (1.0 + ξ)]
+    }
+    /// Physical gradient of the linear shape functions: `∇ₓN₁ = -(x₂-x₁)/L²`,
+    /// `∇ₓN₂ = (x₂-x₁)/L²`, i.e. `±t̂/L` where `t̂` is the unit tangent.
+    fn derivative_shape(&self, parametric_coordinates: [f64; 1]) -> [[f64; D]; 2] {
+        let l = 2.0 * self.jacobe(parametric_coordinates);
+        let l2 = l * l;
+        std::array::from_fn(|node| {
+            std::array::from_fn(|i| {
+                let t = (self.nodes[1].coordinates[i] - self.nodes[0].coordinates[i]) / l2;
+                if node == 0 {
+                    -t
+                } else {
+                    t
+                }
+            })
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::Seg2;
-    use crate::element::Element;
+    use crate::element::{Element, ElementBase};
     use crate::node::Node;
 
     fn close(a: f64, b: f64) -> bool {

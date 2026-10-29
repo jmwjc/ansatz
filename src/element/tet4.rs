@@ -1,7 +1,9 @@
 //! Linear four-node tetrahedron (`P1`, conforming).
 
 use crate::element::inverse_symmetric_3x3;
-use crate::element::{Element, FullIntegration, IntegrationScheme, Keast, ReducedIntegration};
+use crate::element::{
+    Element, ElementBase, FullIntegration, IntegrationScheme, Keast, ReducedIntegration,
+};
 use crate::io::gmsh::{FromGmsh, MeshError, NodeTable};
 use crate::node::Node;
 
@@ -92,7 +94,7 @@ impl<const D: usize> IntegrationScheme<3, 4> for Tet4<D> {
 impl<const D: usize> FullIntegration<3, 4> for Tet4<D> {}
 impl<const D: usize> ReducedIntegration<3, 1> for Tet4<D> {}
 
-impl<const D: usize> Element<D, 3, 4> for Tet4<D> {
+impl<const D: usize> ElementBase<D, 3, 4> for Tet4<D> {
     fn id(&self) -> [usize; 4] {
         [
             self.nodes[0].id,
@@ -100,36 +102,6 @@ impl<const D: usize> Element<D, 3, 4> for Tet4<D> {
             self.nodes[2].id,
             self.nodes[3].id,
         ]
-    }
-
-    /// Barycentric (area/volume coordinate) shape functions on the reference
-    /// tetrahedron `(0,0,0)`, `(1,0,0)`, `(0,1,0)`, `(0,0,1)`.
-    fn shape(&self, parametric_coordinates: [f64; 3]) -> [f64; 4] {
-        let ξ = parametric_coordinates[0];
-        let η = parametric_coordinates[1];
-        let ζ = parametric_coordinates[2];
-        [1.0 - ξ - η - ζ, ξ, η, ζ]
-    }
-
-    /// Physical gradient `∇ₓN = J_α g^{αβ} ∂_βN`, constant on the element.
-    fn derivative_shape(&self, _parametric_coordinates: [f64; 3]) -> [[f64; D]; 4] {
-        let j = self.tangents();
-        let (inverse, _) = inverse_symmetric_3x3(self.metric());
-
-        // Parametric gradients ∂_β N_a.
-        let dn = [
-            [-1.0, -1.0, -1.0],
-            [1.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0],
-            [0.0, 0.0, 1.0],
-        ];
-        std::array::from_fn(|a| {
-            let (dξ, dη, dζ) = (dn[a][0], dn[a][1], dn[a][2]);
-            let c0 = inverse[0] * dξ + inverse[1] * dη + inverse[2] * dζ;
-            let c1 = inverse[1] * dξ + inverse[3] * dη + inverse[4] * dζ;
-            let c2 = inverse[2] * dξ + inverse[4] * dη + inverse[5] * dζ;
-            std::array::from_fn(|d| j[0][d] * c0 + j[1][d] * c1 + j[2][d] * c2)
-        })
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 4] {
@@ -195,6 +167,38 @@ impl<const D: usize> Element<D, 3, 4> for Tet4<D> {
     }
 }
 
+impl<const D: usize> Element<D, 3, 4> for Tet4<D> {
+    /// Barycentric (area/volume coordinate) shape functions on the reference
+    /// tetrahedron `(0,0,0)`, `(1,0,0)`, `(0,1,0)`, `(0,0,1)`.
+    fn shape(&self, parametric_coordinates: [f64; 3]) -> [f64; 4] {
+        let ξ = parametric_coordinates[0];
+        let η = parametric_coordinates[1];
+        let ζ = parametric_coordinates[2];
+        [1.0 - ξ - η - ζ, ξ, η, ζ]
+    }
+
+    /// Physical gradient `∇ₓN = J_α g^{αβ} ∂_βN`, constant on the element.
+    fn derivative_shape(&self, _parametric_coordinates: [f64; 3]) -> [[f64; D]; 4] {
+        let j = self.tangents();
+        let (inverse, _) = inverse_symmetric_3x3(self.metric());
+
+        // Parametric gradients ∂_β N_a.
+        let dn = [
+            [-1.0, -1.0, -1.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ];
+        std::array::from_fn(|a| {
+            let (dξ, dη, dζ) = (dn[a][0], dn[a][1], dn[a][2]);
+            let c0 = inverse[0] * dξ + inverse[1] * dη + inverse[2] * dζ;
+            let c1 = inverse[1] * dξ + inverse[3] * dη + inverse[4] * dζ;
+            let c2 = inverse[2] * dξ + inverse[4] * dη + inverse[5] * dζ;
+            std::array::from_fn(|d| j[0][d] * c0 + j[1][d] * c1 + j[2][d] * c2)
+        })
+    }
+}
+
 impl<const D: usize> FromGmsh<D> for Tet4<D> {
     const GMSH_ELEMENT_TYPE: i32 = 4;
     const GMSH_NODE_COUNT: usize = 4;
@@ -213,7 +217,7 @@ impl<const D: usize> FromGmsh<D> for Tet4<D> {
 #[cfg(test)]
 mod tests {
     use super::Tet4;
-    use crate::element::{Element, IntegrationScheme};
+    use crate::element::{Element, ElementBase, IntegrationScheme};
     use crate::io::gmsh::FromGmsh;
     use crate::node::Node;
 

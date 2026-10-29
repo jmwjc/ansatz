@@ -5,7 +5,7 @@ pub mod heat;
 use std::collections::BTreeSet;
 use std::fmt;
 
-use crate::element::Element;
+use crate::element::{Element, ElementBase};
 use crate::sparse_vector::Doublet;
 use faer::sparse::Triplet;
 

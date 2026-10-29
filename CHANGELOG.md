@@ -9,12 +9,49 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-29
+
+### Breaking Changes
+
+- `Element<D, P, N>` 拆分为共享基 trait `ElementBase<D, P, N>` 与标量特化
+  `Element<D, P, N>: ElementBase`（别名 `ScalarElement`），并新增向量值特化
+  `HdivElement<D, P, N>: ElementBase`：`id`、`vertices_coordinates`、`coordinates`、
+  `jacobe`、`jacobe_mat`、`local_coordinates`、`contains` 移入 `ElementBase`。下游自定义单元
+  需把几何方法拆到单独的 `impl ElementBase` 中；`Variable` 与现有组装算子的 bound 不变。
+
 ### Added
 
+- `element::ElementBase<D, P, N>`：所有单元共享的自由度编号、节点坐标与等参几何接口；
+- `element::HdivElement<D, P, N>`：向量值 $H(\mathrm{div})$ 单元的接口（`shape`、
+  `divergence_shape`），`RTTri3` 为其首个实现；`element::ScalarElement` 为 `Element` 的别名；
+- `element::p0tri3::P0Tri3<D>`：分片常数（P0）三角形，`Element<D, 2, 1>`（单元一个自由度，
+  形函数 1、梯度 0），几何委托 `Tri3`，`from_tri3(&tri, dof_id)`；用于 RT0/P0 混合热传导；
+- `element::rttri3::RTSeg3<D>`：RT0 的边界迹单元（父单元三个通量自由度，`facet = k` 表示对边，
+  `normal_flux_shape(xi)` 给出 $\boldsymbol q_i\cdot\boldsymbol n$，几何为 `Seg2`，`jacobe = L/2`），
+  `RTSeg3::from_rttri3(&rt, facet)`；
+- `operation::heat::{mixed_flux_mass, mixed_divergence, mixed_dirichlet}`：热传导的混合
+  （Hellinger–Reissner）离散弱形式（form B）：$A_{ij}=\int(1/k)\boldsymbol q_i\cdot\boldsymbol q_j$、
+  $C_{ce}=-\int N_c\nabla\cdot\boldsymbol q_e$、$\ell_i=-\int_{\Gamma_D}T_D\boldsymbol q_i\cdot\boldsymbol n$；
+  源项复用 `heat_source`，鞍点系统 `[[A,Cᵀ],[C,0]]` 需 `sp_lu`；
 - `element::crtri3::CRTri3<D>`：Crouzeix–Raviart 非协调线性三角形，实现 `Element<D, 2, 3>`，
   自由度为三条边的平均值（基函数 `θᵢ = 1 − 2λᵢ`），2D 质量矩阵恰好对角 `(|T|/3) I`；
   `CRTri3::from_tri3(&tri, edge_id)` 由 `Tri3` 与"边 → 自由度"闭包构造（节点为边中点，
   `triangle_vertices()` 反射取回真实顶点），`FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`；
+- `element::rttri3::RTTri3<D>`：最低阶 Raviart–Thomas（RT0）三角形，**向量值** $H(\mathrm{div})$
+  单元，自由度为三条边的法向通量 $\Phi_e=\int_{\Gamma_e}\boldsymbol q\cdot\boldsymbol n_e\,ds$，
+  基函数 $\boldsymbol q_I=(\boldsymbol x-\boldsymbol x_I)/(2|T|)$（$\Phi_J(\boldsymbol q_I)=\delta_{IJ}$、
+  $\nabla\cdot\boldsymbol q_I=1/|T|$）。与 `CRTri3` 相同的"边中点 + 边 id"布局（可共用 `EdgeTable`），
+  提供 `from_tri3` / `try_from_tri3`、`triangle_vertices`、`area`、`shape`、
+  `reference_vector_shape`（参考基 + 逆变 Piola）、`divergence_shape` / `divergence`、
+  `mass_matrix`（稠密，闭式）、`edge_normal`、`flux_dof`（任意通量场的边通量自由度），
+  `FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`；实现 `ElementBase<D, 2, 3>` 与
+  `HdivElement<D, 2, 3>`（向量基 `shape`、散度 `divergence_shape`），不是标量 `Element`；
+- `examples/rt0.rs`：RT0 形函数可视化示例（`cargo run --example rt0`），在参考三角形上输出
+  `target/rt0_shape_functions.png`（三个基函数的向量场图）与
+  `target/rt0_shape_components.png`（每个基函数的 $x$/$y$ 分量热图、等值线与色条）；
+- mdBook 新增理论章「混合格式与 $H(\mathrm{div})$：Raviart–Thomas（RT0）」
+  （`book/src/theory-rt.md`）：混合格式、RT0 的显式构造、Piola 映射、杂交化 RT0 与 CR 刚度矩阵的
+  等价、CR 解的后处理通量；
 - `element::tet4::Tet4<D>`：4 节点线性（协调）四面体，实现 `Element<D, 3, 4>`、`FromGmsh`
   （GMSH 类型 4），`volume()`、`FullIntegration<3, 4>` / `ReducedIntegration<3, 1>`；
 - `element::crtet4::CRTet4<D>`：Crouzeix–Raviart 非协调线性四面体，实现 `Element<D, 3, 4>`，
@@ -195,6 +232,7 @@
 
 早期内部原型（crate 名 `rustfem`），未发布到 crates.io，保留此条目仅用于说明版本沿革。
 
-[Unreleased]: https://github.com/jmwjc/ansatz/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/jmwjc/ansatz/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/jmwjc/ansatz/releases/tag/v0.4.0
 [0.3.0]: https://github.com/jmwjc/ansatz/releases/tag/v0.3.0
 [0.2.0]: https://github.com/jmwjc/ansatz/releases/tag/v0.2.0

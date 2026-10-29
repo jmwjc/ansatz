@@ -25,7 +25,7 @@ use crate::element::inverse_symmetric_3x3;
 use crate::element::tet4::Tet4;
 use crate::element::tri3::Tri3;
 use crate::element::{
-    Dunavant, Element, FullIntegration, IntegrationScheme, Keast, ReducedIntegration,
+    Dunavant, Element, ElementBase, FullIntegration, IntegrationScheme, Keast, ReducedIntegration,
 };
 use crate::node::Node;
 
@@ -206,7 +206,7 @@ impl<const D: usize> IntegrationScheme<3, 4> for CRTet4<D> {
 impl<const D: usize> FullIntegration<3, 4> for CRTet4<D> {}
 impl<const D: usize> ReducedIntegration<3, 1> for CRTet4<D> {}
 
-impl<const D: usize> Element<D, 3, 4> for CRTet4<D> {
+impl<const D: usize> ElementBase<D, 3, 4> for CRTet4<D> {
     fn id(&self) -> [usize; 4] {
         [
             self.nodes[0].id,
@@ -214,38 +214,6 @@ impl<const D: usize> Element<D, 3, 4> for CRTet4<D> {
             self.nodes[2].id,
             self.nodes[3].id,
         ]
-    }
-
-    /// Face-average basis `θₐ = 1 − 3λₐ` on the reference tetrahedron
-    /// `(0,0,0), (1,0,0), (0,1,0), (0,0,1)`, with `λ = (1 − ξ − η − ζ, ξ, η, ζ)`.
-    fn shape(&self, parametric_coordinates: [f64; 3]) -> [f64; 4] {
-        let ξ = parametric_coordinates[0];
-        let η = parametric_coordinates[1];
-        let ζ = parametric_coordinates[2];
-        let lambda = [1.0 - ξ - η - ζ, ξ, η, ζ];
-        std::array::from_fn(|a| 1.0 - 3.0 * lambda[a])
-    }
-
-    /// Physical gradient `∇ₓθₐ = −3 ∇ₓλₐ`, constant on the element and computed with
-    /// the metric tensor: `∇ₓN = J_α g^{αβ} ∂_βN`.
-    fn derivative_shape(&self, _parametric_coordinates: [f64; 3]) -> [[f64; D]; 4] {
-        let j = self.tangents();
-        let (inverse, _) = inverse_symmetric_3x3(self.metric());
-
-        // Parametric gradients ∂_β N_a of `θₐ = 1 − 3λₐ`.
-        let dn = [
-            [3.0, 3.0, 3.0],
-            [-3.0, 0.0, 0.0],
-            [0.0, -3.0, 0.0],
-            [0.0, 0.0, -3.0],
-        ];
-        std::array::from_fn(|a| {
-            let (dξ, dη, dζ) = (dn[a][0], dn[a][1], dn[a][2]);
-            let c0 = inverse[0] * dξ + inverse[1] * dη + inverse[2] * dζ;
-            let c1 = inverse[1] * dξ + inverse[3] * dη + inverse[4] * dζ;
-            let c2 = inverse[2] * dξ + inverse[4] * dη + inverse[5] * dζ;
-            std::array::from_fn(|d| j[0][d] * c0 + j[1][d] * c1 + j[2][d] * c2)
-        })
     }
 
     /// The four face centroids (the element's nodes).
@@ -313,6 +281,40 @@ impl<const D: usize> Element<D, 3, 4> for CRTet4<D> {
         }
 
         Some([ξ, η, ζ])
+    }
+}
+
+impl<const D: usize> Element<D, 3, 4> for CRTet4<D> {
+    /// Face-average basis `θₐ = 1 − 3λₐ` on the reference tetrahedron
+    /// `(0,0,0), (1,0,0), (0,1,0), (0,0,1)`, with `λ = (1 − ξ − η − ζ, ξ, η, ζ)`.
+    fn shape(&self, parametric_coordinates: [f64; 3]) -> [f64; 4] {
+        let ξ = parametric_coordinates[0];
+        let η = parametric_coordinates[1];
+        let ζ = parametric_coordinates[2];
+        let lambda = [1.0 - ξ - η - ζ, ξ, η, ζ];
+        std::array::from_fn(|a| 1.0 - 3.0 * lambda[a])
+    }
+
+    /// Physical gradient `∇ₓθₐ = −3 ∇ₓλₐ`, constant on the element and computed with
+    /// the metric tensor: `∇ₓN = J_α g^{αβ} ∂_βN`.
+    fn derivative_shape(&self, _parametric_coordinates: [f64; 3]) -> [[f64; D]; 4] {
+        let j = self.tangents();
+        let (inverse, _) = inverse_symmetric_3x3(self.metric());
+
+        // Parametric gradients ∂_β N_a of `θₐ = 1 − 3λₐ`.
+        let dn = [
+            [3.0, 3.0, 3.0],
+            [-3.0, 0.0, 0.0],
+            [0.0, -3.0, 0.0],
+            [0.0, 0.0, -3.0],
+        ];
+        std::array::from_fn(|a| {
+            let (dξ, dη, dζ) = (dn[a][0], dn[a][1], dn[a][2]);
+            let c0 = inverse[0] * dξ + inverse[1] * dη + inverse[2] * dζ;
+            let c1 = inverse[1] * dξ + inverse[3] * dη + inverse[4] * dζ;
+            let c2 = inverse[2] * dξ + inverse[4] * dη + inverse[5] * dζ;
+            std::array::from_fn(|d| j[0][d] * c0 + j[1][d] * c1 + j[2][d] * c2)
+        })
     }
 }
 
@@ -389,11 +391,35 @@ impl<const D: usize> CRTri4<D> {
     }
 }
 
-impl<const D: usize> Element<D, 2, 4> for CRTri4<D> {
+impl<const D: usize> ElementBase<D, 2, 4> for CRTri4<D> {
     fn id(&self) -> [usize; 4] {
         self.facets
     }
 
+    /// The parent's vertices (the element's nodes are facets, not points).
+    fn vertices_coordinates(&self) -> [[f64; D]; 4] {
+        self.vertices.map(|vertex| vertex.coordinates)
+    }
+
+    fn coordinates(&self, parametric_coordinates: [f64; 2]) -> [f64; D] {
+        self.as_tri3().coordinates(parametric_coordinates)
+    }
+
+    /// Area scaling of the facet: `2 × area`.
+    fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
+        self.as_tri3().jacobe(parametric_coordinates)
+    }
+
+    fn jacobe_mat(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 2] {
+        self.as_tri3().jacobe_mat(parametric_coordinates)
+    }
+
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 2]> {
+        self.as_tri3().local_coordinates(x)
+    }
+}
+
+impl<const D: usize> Element<D, 2, 4> for CRTri4<D> {
     /// Trace basis on the facet: `shapeₐ = 1 − 3λₐ` with the parent's `λ` scattered
     /// from the facet's barycentric coordinates (the opposite vertex is zero).
     /// At the facet centroid the facet's own dof is `1` and the other three are `0`.
@@ -428,28 +454,6 @@ impl<const D: usize> Element<D, 2, 4> for CRTri4<D> {
         }
         out
     }
-
-    /// The parent's vertices (the element's nodes are facets, not points).
-    fn vertices_coordinates(&self) -> [[f64; D]; 4] {
-        self.vertices.map(|vertex| vertex.coordinates)
-    }
-
-    fn coordinates(&self, parametric_coordinates: [f64; 2]) -> [f64; D] {
-        self.as_tri3().coordinates(parametric_coordinates)
-    }
-
-    /// Area scaling of the facet: `2 × area`.
-    fn jacobe(&self, parametric_coordinates: [f64; 2]) -> f64 {
-        self.as_tri3().jacobe(parametric_coordinates)
-    }
-
-    fn jacobe_mat(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 2] {
-        self.as_tri3().jacobe_mat(parametric_coordinates)
-    }
-
-    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 2]> {
-        self.as_tri3().local_coordinates(x)
-    }
 }
 
 impl<const D: usize> IntegrationScheme<2, 1> for CRTri4<D> {
@@ -477,7 +481,7 @@ impl<const D: usize> ReducedIntegration<2, 1> for CRTri4<D> {}
 mod tests {
     use super::{CRTet4, CRTri4};
     use crate::element::tet4::Tet4;
-    use crate::element::{Element, IntegrationScheme};
+    use crate::element::{Element, ElementBase, IntegrationScheme};
     use crate::node::Node;
 
     fn close(a: f64, b: f64) -> bool {

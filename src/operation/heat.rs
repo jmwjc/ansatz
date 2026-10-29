@@ -11,8 +11,34 @@
 //! All operators reuse the [`crate::element::Element`] / [`Variable`] /
 //! [`crate::element::IntegrationScheme`] abstractions; see
 //! `book/src/theory-heat.md` for the underlying theory.
+//!
+//! # Mixed (Hellinger–Reissner) form
+//!
+//! The two-field form of §4.2 of `book/Hellinger-Reissner heat weak form.md`
+//! takes the flux `q ∈ H(div)` and the temperature `T ∈ L²` as independent
+//! unknowns:
+//!
+//! ```text
+//! (B1)  ∫ (1/k) q·r − ∫ T ∇·r = −∫_{Γ_D} T_D r·n
+//! (B2)  −∫ ∇·q w = ∫ f w
+//! ```
+//!
+//! Its discrete blocks are assembled by [`mixed_flux_mass`] (`A`),
+//! [`mixed_divergence`] (`C`, with the `−` sign of (B1)/(B2)) and
+//! [`mixed_dirichlet`] (the natural Dirichlet load `ℓ`). The source term of
+//! (B2) is the ordinary [`heat_source`] applied to the temperature elements,
+//! and the Neumann datum is **essential** on the flux dofs (fix
+//! `Φₑ = ℓₑ q_n`), so it has no load operator. The resulting matrix
+//! `[[A, Cᵀ], [C, 0]]` is symmetric indefinite and must be factored with sparse
+//! LU (`sp_lu`), not Cholesky.
+//!
+//! The operators return the element dof ids unchanged: the flux dofs are edge
+//! ids and the P0 temperature dofs are cell ids, so the caller must place the
+//! two ranges in **disjoint** global index spaces (for example edge ids first,
+//! then `n_edges + cell`) when building the saddle-point matrix.
 
-use crate::element::{Element, FullIntegration, IntegrationScheme};
+use crate::element::rttri3::RTSeg3;
+use crate::element::{Element, ElementBase, FullIntegration, HdivElement, IntegrationScheme};
 use crate::operation::{
     node_coefficients, Doublets, Triplets, TripletsAndDoublets, Variable, VariableError,
 };
@@ -62,6 +88,186 @@ where
         }
     }
     triplets
+}
+
+/// Assembles the flux-mass block `A` of the mixed (Hellinger–Reissner) heat
+/// problem.
+///
+/// With the flux `q` and the temperature `T` as independent fields, the mixed
+/// weak form of the heat equation is (form B of §4.2 of
+/// `book/Hellinger-Reissner heat weak form.md`)
+///
+/// ```text
+/// (B1)  ∫_Ω (1/k) q·r − ∫_Ω T ∇·r = −∫_{Γ_D} T_D r·n
+/// (B2)  −∫_Ω ∇·q w = ∫_Ω f w
+/// ```
+///
+/// and this operator returns the flux block
+///
+/// `Aᵢⱼ = ∫_Ω (1/k) qᵢ·qⱼ dΩ`
+///
+/// for every element of `flux`. The result is the **full** (not triangular)
+/// block: the mixed system `[[A, Cᵀ], [C, 0]]` is symmetric indefinite and is
+/// factored by sparse LU, which reads both triangles.
+///
+/// `flux` holds the flux element (e.g. [`crate::element::rttri3::RTTri3`]);
+/// each must implement [`HdivElement`] and [`FullIntegration<P, G>`] (the
+/// integrand is quadratic). Signs: the flux basis of
+/// [`crate::element::rttri3::RTTri3`] uses the element's **outward** normal, so
+/// when several elements share an edge the caller must apply the global
+/// edge-orientation sign `σ_{e,T} = ±1` to the corresponding rows/columns of
+/// `A` (and to `C`, see [`mixed_divergence`]) as described in
+/// `book/Hellinger-Reissner heat weak form.md` §9.
+pub fn mixed_flux_mass<Q, const D: usize, const P: usize, const N: usize, const G: usize>(
+    flux: &[Q],
+    k: f64,
+) -> Triplets
+where
+    Q: HdivElement<D, P, N> + FullIntegration<P, G>,
+{
+    let ξ = Q::points();
+    let w = Q::weights();
+    let mut triplets: Triplets = Vec::with_capacity(flux.len() * N * N * G);
+    for elm in flux {
+        let id = elm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let shape = elm.shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            for i in 0..N {
+                for j in 0..N {
+                    let dot = (0..D).map(|d| shape[i][d] * shape[j][d]).sum::<f64>();
+                    triplets.push(Triplet::new(id[i], id[j], dot * jacobe * wg / k));
+                }
+            }
+        }
+    }
+    triplets
+}
+
+/// Assembles the divergence coupling block `C` of the mixed (Hellinger–Reissner)
+/// heat problem.
+///
+/// For the mixed form (B1)–(B2) of §4.2 of
+/// `book/Hellinger-Reissner heat weak form.md`, the coupling is
+///
+/// `C_{ce} = −∫_{T_c} N_c ∇·q_e dΩ`,
+///
+/// i.e. rows are temperature dofs (`temperature` element `k`) and columns are
+/// flux dofs (`flux` element `k`). The transposed block `Cᵀ` is assembled by
+/// swapping row and column; with `A` from [`mixed_flux_mass`] the saddle-point
+/// system is
+///
+/// ```text
+/// [ A  Cᵀ ] [ q ]   [ ℓ ]
+/// [ C  0  ] [ T ] = [ m ]
+/// ```
+///
+/// with `ℓ` from [`mixed_dirichlet`] and `m = heat_source(temperature, f)`.
+///
+/// The two element sets are paired in iteration order, so they must have the
+/// same length and share the parametric domain and geometry; quadrature points,
+/// weights and the Jacobian are taken from the **flux** element (which is why it
+/// needs [`FullIntegration<P, G>`]), while the temperature element contributes
+/// only `shape` and `id`. A natural choice is
+/// [`crate::element::rttri3::RTTri3`] for the flux and
+/// [`crate::element::p0tri3::P0Tri3`] for the temperature.
+///
+/// # Errors
+///
+/// Returns [`VariableError::ElementCountMismatch`] if the two element sets hold
+/// a different number of elements.
+pub fn mixed_divergence<
+    Q,
+    T,
+    const D: usize,
+    const P: usize,
+    const N: usize,
+    const M: usize,
+    const G: usize,
+>(
+    flux: &[Q],
+    temperature: &[T],
+) -> Result<Triplets, VariableError>
+where
+    Q: HdivElement<D, P, N> + FullIntegration<P, G>,
+    T: Element<D, P, M>,
+{
+    if flux.len() != temperature.len() {
+        return Err(VariableError::ElementCountMismatch {
+            first: flux.len(),
+            second: temperature.len(),
+        });
+    }
+
+    let ξ = Q::points();
+    let w = Q::weights();
+    let mut triplets: Triplets = Vec::with_capacity(flux.len() * M * N * G);
+    for (elm, telm) in flux.iter().zip(temperature) {
+        let id = elm.id();
+        let tid = telm.id();
+        for g in 0..G {
+            let ξg = ξ[g];
+            let wg = w[g];
+            let divergence = elm.divergence_shape(ξg);
+            let shape = telm.shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            for c in 0..M {
+                for e in 0..N {
+                    triplets.push(Triplet::new(
+                        tid[c],
+                        id[e],
+                        -shape[c] * divergence[e] * jacobe * wg,
+                    ));
+                }
+            }
+        }
+    }
+    Ok(triplets)
+}
+
+/// Assembles the Dirichlet load `ℓ` of the mixed (Hellinger–Reissner) heat
+/// problem.
+///
+/// In the mixed form the Dirichlet datum is **natural** and enters the right-hand
+/// side of (B1):
+///
+/// `ℓᵢ = −∫_{Γ_D} T_D (qᵢ·n) ds`.
+///
+/// `boundary` holds the RT0 boundary traces on `Γ_D`, built with
+/// [`RTSeg3::from_rttri3`]; `td` maps physical coordinates to the prescribed
+/// temperature. Each trace contributes the normal-flux shape functions of the
+/// **whole** adjacent triangle (`RTSeg3::normal_flux_shape`), i.e. the assembly
+/// is not restricted to the edge's own dof (for RT0 the other two traces vanish
+/// identically; higher-order members would contribute moments). The sign is the
+/// same as in [`heat_flux`]: `−q_n = k ∂T/∂n`, hence the minus sign above. A
+/// Neumann datum is **essential** in this formulation: fix the boundary flux dof
+/// to `Φₑ = ℓₑ q_n` instead of adding a load.
+///
+/// The integral uses the two-point Gauss–Legendre rule on the edge (exact for
+/// the constant RT0 normal trace times a cubic `T_D`). As in
+/// [`mixed_flux_mass`], the traces use the parent element's outward normal; for
+/// a global edge orientation the caller must apply the corresponding `±1` sign.
+pub fn mixed_dirichlet<const D: usize>(
+    boundary: &[RTSeg3<D>],
+    td: impl Fn([f64; D]) -> f64,
+) -> Doublets {
+    let ξ = <RTSeg3<D> as IntegrationScheme<1, 2>>::points();
+    let w = <RTSeg3<D> as IntegrationScheme<1, 2>>::weights();
+    let mut doublets: Doublets = Vec::with_capacity(boundary.len() * 3 * 2);
+    for elm in boundary {
+        let id = elm.id();
+        for (ξg, wg) in ξ.into_iter().zip(w) {
+            let shape = elm.normal_flux_shape(ξg);
+            let jacobe = elm.jacobe(ξg);
+            let td_g = td(elm.coordinates(ξg));
+            for i in 0..3 {
+                doublets.push(Doublet::new(id[i], -shape[i] * td_g * jacobe * wg));
+            }
+        }
+    }
+    doublets
 }
 
 /// Assembles the heat-capacity (mass) matrix and returns sparse triplets for
@@ -537,8 +743,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::element::ElementBase;
+    use crate::element::p0tri3::P0Tri3;
     use crate::element::poi1::Poi1;
+    use crate::element::rttri3::{RTSeg3, RTTri3};
     use crate::element::seg2::Seg2;
+    use crate::element::tri3::Tri3;
     use crate::node::Node;
     use crate::sparse_vector::try_new_from_doublet;
     use faer::Side;
@@ -570,6 +780,147 @@ mod tests {
         assert!(close(k00, 0.5));
         assert!(close(k10, -0.5));
         assert!(close(k11, 0.5));
+    }
+
+    /// Right triangle `(0,0)`, `(3,0)`, `(0,4)` with RT0 edge dofs `0,1,2` and
+    /// the P0 cell dof `3`.
+    fn mixed_right_triangle() -> (RTTri3<2>, P0Tri3<2>) {
+        let tri = Tri3::new(
+            Node::new(0, [0.0, 0.0]),
+            Node::new(1, [3.0, 0.0]),
+            Node::new(2, [0.0, 4.0]),
+        );
+        let mut next = 0;
+        let rt = RTTri3::from_tri3(&tri, |_, _| {
+            let id = next;
+            next += 1;
+            id
+        });
+        let p0 = P0Tri3::from_tri3(&tri, 3);
+        (rt, p0)
+    }
+
+    #[test]
+    fn mixed_flux_mass_matches_the_rt_mass_matrix() {
+        // A_ij = ∫ (1/k) q_i·q_j is the RT0 mass matrix divided by k. The mixed
+        // operator returns every entry (the saddle-point matrix is LU-factored).
+        let (rt, _) = mixed_right_triangle();
+        let k = 2.0;
+        let triplets = mixed_flux_mass(std::slice::from_ref(&rt), k);
+
+        let mut a = [[0.0_f64; 3]; 3];
+        for t in &triplets {
+            a[t.row][t.col] += t.val;
+        }
+        let m = rt.mass_matrix();
+        for (i, row) in a.iter().enumerate() {
+            for (j, value) in row.iter().enumerate() {
+                assert!((value - m[i][j] / k).abs() < 1e-10);
+                assert!(close(a[i][j], a[j][i]));
+            }
+        }
+        assert!(a[0][1].abs() > 1e-3, "the flux mass matrix is dense");
+    }
+
+    #[test]
+    fn mixed_divergence_couples_cell_temperature_and_flux() {
+        // C_ce = −∫ N_c ∇·q_e = −1 for every RT0 basis (∇·q_e = 1/|T|).
+        let (rt, p0) = mixed_right_triangle();
+        let c = mixed_divergence(std::slice::from_ref(&rt), std::slice::from_ref(&p0)).unwrap();
+        // Three quadrature points contribute to each of the three flux columns.
+        assert_eq!(c.len(), 3 * 3);
+        let mut row = [0.0_f64; 3];
+        for t in &c {
+            assert_eq!(t.row, 3, "the single temperature dof is the row");
+            row[t.col] += t.val;
+        }
+        for value in row {
+            assert!(close(value, -1.0));
+        }
+
+        let empty: [P0Tri3<2>; 0] = [];
+        let err = mixed_divergence(std::slice::from_ref(&rt), &empty).unwrap_err();
+        assert_eq!(
+            err,
+            VariableError::ElementCountMismatch {
+                first: 1,
+                second: 0
+            }
+        );
+    }
+
+    #[test]
+    fn mixed_source_is_the_cell_integral_of_the_source() {
+        // The (B2) load is just heat_source applied to the P0 temperature: with
+        // f = x + y the single cell dof receives ∫_T (x + y) = |T|·(c_x + c_y)
+        // = 6·(1 + 4/3) = 14.
+        let (_, p0) = mixed_right_triangle();
+        let cells = vec![p0];
+        let source = heat_source(&cells, |x: [f64; 2]| x[0] + x[1]);
+        let mut total = 0.0;
+        for entry in &source {
+            assert_eq!(entry.index, 3);
+            total += entry.value;
+        }
+        assert!(close(total, 14.0), "∫(x + y) = {total} != 14");
+    }
+
+    #[test]
+    fn mixed_dirichlet_integrates_the_temperature_trace() {
+        // ℓ_i = −∫ T_D q_i·n ds; for RT0 the normal trace is δ_{i,facet}/ℓ,
+        // so the own dof receives −(average of T_D on that edge) and the other
+        // two dofs receive nothing.
+        let (rt, _) = mixed_right_triangle();
+        let midpoints = [[1.5, 2.0], [0.0, 2.0], [1.5, 0.0]];
+        let td = |x: [f64; 2]| 2.0 + 3.0 * x[0] - x[1];
+
+        for (facet, midpoint) in midpoints.iter().enumerate() {
+            let trace = RTSeg3::from_rttri3(&rt, facet).unwrap();
+            let load = mixed_dirichlet(&[trace], td);
+            let expected = -(2.0 + 3.0 * midpoint[0] - midpoint[1]);
+            let mut own = 0.0;
+            for d in &load {
+                if d.index == rt.id()[facet] {
+                    own += d.value;
+                } else {
+                    assert!(close(d.value, 0.0), "the other flux dofs have zero trace");
+                }
+            }
+            assert!(close(own, expected), "facet {facet}: {own} != {expected}");
+        }
+    }
+
+    #[test]
+    fn mixed_heat_saddle_point_reproduces_a_linear_temperature() {
+        // One RT0/P0 element, k = 1, f = 0, and T = 2 + x + 2y prescribed on the
+        // three edges (natural Dirichlet datum). The exact flux is q = −∇T =
+        // (−1, −2), whose edge fluxes are ∫ q·n ds = [−10, 4, 6], and the P0
+        // temperature is the cell average T = 2 + 1 + 2·(4/3) = 17/3.
+        let (rt, p0) = mixed_right_triangle();
+        let td = |x: [f64; 2]| 2.0 + x[0] + 2.0 * x[1];
+
+        let mut triplets = mixed_flux_mass(std::slice::from_ref(&rt), 1.0);
+        let coupling =
+            mixed_divergence(std::slice::from_ref(&rt), std::slice::from_ref(&p0)).unwrap();
+        for t in &coupling {
+            triplets.push(Triplet::new(t.row, t.col, t.val));
+            triplets.push(Triplet::new(t.col, t.row, t.val));
+        }
+
+        let mut doublets = Doublets::new();
+        for facet in 0..3 {
+            let trace = RTSeg3::from_rttri3(&rt, facet).unwrap();
+            doublets.extend(mixed_dirichlet(&[trace], td));
+        }
+
+        let a = SparseColMat::<usize, f64>::try_new_from_triplets(4, 4, &triplets).unwrap();
+        let f = try_new_from_doublet(4, &doublets).unwrap();
+        let d = a.sp_lu().unwrap().solve(&f);
+
+        assert!(close(d[0], -10.0), "Φ₀ = {}", d[0]);
+        assert!(close(d[1], 4.0), "Φ₁ = {}", d[1]);
+        assert!(close(d[2], 6.0), "Φ₂ = {}", d[2]);
+        assert!(close(d[3], 17.0 / 3.0), "T = {}", d[3]);
     }
 
     #[test]
@@ -791,15 +1142,9 @@ mod tests {
         }
     }
 
-    impl Element<1, 1, 1> for ConstantEdge {
+    impl ElementBase<1, 1, 1> for ConstantEdge {
         fn id(&self) -> [usize; 1] {
             [self.dof.id]
-        }
-        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
-            [1.0]
-        }
-        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; 1]; 1] {
-            [[0.0]]
         }
         fn vertices_coordinates(&self) -> [[f64; 1]; 1] {
             [self.ends[0].coordinates]
@@ -816,6 +1161,15 @@ mod tests {
         fn local_coordinates(&self, x: [f64; 1]) -> Option<[f64; 1]> {
             let (a, b) = (self.ends[0].coordinates[0], self.ends[1].coordinates[0]);
             ((x[0] - a) * (x[0] - b) <= 0.0).then_some([0.0])
+        }
+    }
+
+    impl Element<1, 1, 1> for ConstantEdge {
+        fn shape(&self, _parametric_coordinates: [f64; 1]) -> [f64; 1] {
+            [1.0]
+        }
+        fn derivative_shape(&self, _parametric_coordinates: [f64; 1]) -> [[f64; 1]; 1] {
+            [[0.0]]
         }
     }
 

@@ -1,5 +1,5 @@
 use crate::element::{
-    Element, FullIntegration, IntegrationScheme, ReducedIntegration, TensorProductQuad,
+    Element, ElementBase, FullIntegration, IntegrationScheme, ReducedIntegration, TensorProductQuad,
 };
 use crate::node::Node;
 
@@ -50,7 +50,7 @@ impl<const D: usize> IntegrationScheme<2, 4> for Quad4<D> {
 impl<const D: usize> FullIntegration<2, 4> for Quad4<D> {}
 impl<const D: usize> ReducedIntegration<2, 1> for Quad4<D> {}
 
-impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
+impl<const D: usize> ElementBase<D, 2, 4> for Quad4<D> {
     fn id(&self) -> [usize; 4] {
         [
             self.nodes[0].id,
@@ -58,57 +58,6 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
             self.nodes[2].id,
             self.nodes[3].id,
         ]
-    }
-
-    /// Bilinear shape functions: nodes 1, 2, 3, 4 correspond respectively to the reference
-    /// quadrilateral vertices `(-1, -1)`, `(1, -1)`, `(1, 1)`, `(-1, 1)`.
-    fn shape(&self, parametric_coordinates: [f64; 2]) -> [f64; 4] {
-        let ξ = parametric_coordinates[0];
-        let η = parametric_coordinates[1];
-        [
-            0.25 * (1.0 - ξ) * (1.0 - η),
-            0.25 * (1.0 + ξ) * (1.0 - η),
-            0.25 * (1.0 + ξ) * (1.0 + η),
-            0.25 * (1.0 - ξ) * (1.0 + η),
-        ]
-    }
-
-    /// Physical gradient of the bilinear shape functions, computed directly via
-    /// the metric tensor: `∇ₓN = j_α g^{αβ} ∂_β N`. Valid for both `D = 2`
-    /// (plane quadrilateral) and `D = 3` (spatial quadrilateral).
-    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 4] {
-        let j = self.jacobe_mat(parametric_coordinates);
-        let j0 = &j[0]; // ∂x/∂ξ
-        let j1 = &j[1]; // ∂x/∂η
-
-        // Metric tensor g_{αβ} = j_α · j_β.
-        let g00: f64 = j0.iter().map(|v| v * v).sum();
-        let g01: f64 = j0.iter().zip(j1).map(|(a, b)| a * b).sum();
-        let g11: f64 = j1.iter().map(|v| v * v).sum();
-        let det = g00 * g11 - g01 * g01;
-
-        // Inverse metric g^{αβ}.
-        let gi00 = g11 / det;
-        let gi01 = -g01 / det;
-        let gi11 = g00 / det;
-
-        // Parametric gradients ∂_β N_a = (∂N_a/∂ξ, ∂N_a/∂η).
-        let ξ = parametric_coordinates[0];
-        let η = parametric_coordinates[1];
-        let dn: [[f64; 2]; 4] = [
-            [-0.25 * (1.0 - η), -0.25 * (1.0 - ξ)],
-            [0.25 * (1.0 - η), -0.25 * (1.0 + ξ)],
-            [0.25 * (1.0 + η), 0.25 * (1.0 + ξ)],
-            [-0.25 * (1.0 + η), 0.25 * (1.0 - ξ)],
-        ];
-
-        // ∇ₓN_a = j_ξ (g^{ξξ}∂_ξN + g^{ξη}∂_ηN) + j_η (g^{ηξ}∂_ξN + g^{ηη}∂_ηN).
-        std::array::from_fn(|a| {
-            let (dξ, dη) = (dn[a][0], dn[a][1]);
-            let c0 = gi00 * dξ + gi01 * dη;
-            let c1 = gi01 * dξ + gi11 * dη;
-            std::array::from_fn(|i| j0[i] * c0 + j1[i] * c1)
-        })
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 4] {
@@ -219,11 +168,63 @@ impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
     }
 }
 
+impl<const D: usize> Element<D, 2, 4> for Quad4<D> {
+    /// Bilinear shape functions: nodes 1, 2, 3, 4 correspond respectively to the reference
+    /// quadrilateral vertices `(-1, -1)`, `(1, -1)`, `(1, 1)`, `(-1, 1)`.
+    fn shape(&self, parametric_coordinates: [f64; 2]) -> [f64; 4] {
+        let ξ = parametric_coordinates[0];
+        let η = parametric_coordinates[1];
+        [
+            0.25 * (1.0 - ξ) * (1.0 - η),
+            0.25 * (1.0 + ξ) * (1.0 - η),
+            0.25 * (1.0 + ξ) * (1.0 + η),
+            0.25 * (1.0 - ξ) * (1.0 + η),
+        ]
+    }
+
+    /// Physical gradient of the bilinear shape functions, computed directly via
+    /// the metric tensor: `∇ₓN = j_α g^{αβ} ∂_β N`. Valid for both `D = 2`
+    /// (plane quadrilateral) and `D = 3` (spatial quadrilateral).
+    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 4] {
+        let j = self.jacobe_mat(parametric_coordinates);
+        let j0 = &j[0]; // ∂x/∂ξ
+        let j1 = &j[1]; // ∂x/∂η
+
+        // Metric tensor g_{αβ} = j_α · j_β.
+        let g00: f64 = j0.iter().map(|v| v * v).sum();
+        let g01: f64 = j0.iter().zip(j1).map(|(a, b)| a * b).sum();
+        let g11: f64 = j1.iter().map(|v| v * v).sum();
+        let det = g00 * g11 - g01 * g01;
+
+        // Inverse metric g^{αβ}.
+        let gi00 = g11 / det;
+        let gi01 = -g01 / det;
+        let gi11 = g00 / det;
+
+        // Parametric gradients ∂_β N_a = (∂N_a/∂ξ, ∂N_a/∂η).
+        let ξ = parametric_coordinates[0];
+        let η = parametric_coordinates[1];
+        let dn: [[f64; 2]; 4] = [
+            [-0.25 * (1.0 - η), -0.25 * (1.0 - ξ)],
+            [0.25 * (1.0 - η), -0.25 * (1.0 + ξ)],
+            [0.25 * (1.0 + η), 0.25 * (1.0 + ξ)],
+            [-0.25 * (1.0 + η), 0.25 * (1.0 - ξ)],
+        ];
+
+        // ∇ₓN_a = j_ξ (g^{ξξ}∂_ξN + g^{ξη}∂_ηN) + j_η (g^{ηξ}∂_ξN + g^{ηη}∂_ηN).
+        std::array::from_fn(|a| {
+            let (dξ, dη) = (dn[a][0], dn[a][1]);
+            let c0 = gi00 * dξ + gi01 * dη;
+            let c1 = gi01 * dξ + gi11 * dη;
+            std::array::from_fn(|i| j0[i] * c0 + j1[i] * c1)
+        })
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::Quad4;
-    use crate::element::Element;
+    use crate::element::{Element, ElementBase};
     use crate::node::Node;
 
     fn close(a: f64, b: f64) -> bool {

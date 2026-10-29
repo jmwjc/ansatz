@@ -1,7 +1,9 @@
 pub mod crtet4;
 pub mod crtri3;
+pub mod p0tri3;
 pub mod poi1;
 pub mod quad4;
+pub mod rttri3;
 pub mod seg2;
 pub mod tet4;
 pub mod tri3;
@@ -41,19 +43,26 @@ pub(crate) fn inverse_symmetric_3x3(g: [f64; 6]) -> ([f64; 6], f64) {
     )
 }
 
-pub trait Element<const D: usize, const P: usize, const N: usize> {
+/// Shared interface of every element: global degrees of freedom, node
+/// coordinates, and the isoparametric geometry.
+///
+/// This is the part of the element abstraction that does not depend on whether
+/// the approximation is scalar (see [`Element`]) or vector-valued (see
+/// [`HdivElement`]). Code that only needs the geometry — point location,
+/// Jacobians, measures, bounding boxes — can be written against this trait
+/// alone.
+///
+/// As with any trait, methods of this trait are available on `T: Element` and
+/// `T: HdivElement` bounds through the supertrait relation; concrete-type calls
+/// need this trait in scope.
+pub trait ElementBase<const D: usize, const P: usize, const N: usize> {
+    /// Global ids of the `N` degrees of freedom of this element.
     fn id(&self) -> [usize; N];
-    fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
 
-    /// Physical gradient of each shape function with respect to the physical
-    /// coordinates `x`: `∇ₓNᵢ = [∂Nᵢ/∂x₁, …, ∂Nᵢ/∂x_D]`.
-    ///
-    /// The return value is indexed `[node][spatial]`: `N` rows (one per node),
-    /// each a `D`-dimensional vector. This is the *physical* gradient (obtained
-    /// from the parametric gradient via the Jacobian), not the parametric one.
-    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
-
+    /// Coordinates of the `N` nodes, in local ordering.
     fn vertices_coordinates(&self) -> [[f64; D]; N];
+
+    /// Isoparametric map: physical coordinates of the parametric point `ξ`.
     fn coordinates(&self, parametric_coordinates: [f64; P]) -> [f64; D];
 
     /// Volume/area/length scaling factor between the reference and physical
@@ -75,6 +84,56 @@ pub trait Element<const D: usize, const P: usize, const N: usize> {
     fn contains(&self, x: [f64; D]) -> bool {
         self.local_coordinates(x).is_some()
     }
+}
+
+/// Scalar element: one scalar shape function per degree of freedom.
+///
+/// This is the trait implemented by every scalar element of the crate
+/// (`Seg2`, `Tri3`, `Quad4`, `Tet4`, `Poi1` and the CR family). It keeps the
+/// historical name `Element`; [`ScalarElement`] is an alias for readability
+/// when the contrast with [`HdivElement`] matters.
+pub trait Element<const D: usize, const P: usize, const N: usize>: ElementBase<D, P, N> {
+    fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
+
+    /// Physical gradient of each shape function with respect to the physical
+    /// coordinates `x`: `∇ₓNᵢ = [∂Nᵢ/∂x₁, …, ∂Nᵢ/∂x_D]`.
+    ///
+    /// The return value is indexed `[node][spatial]`: `N` rows (one per node),
+    /// each a `D`-dimensional vector. This is the *physical* gradient (obtained
+    /// from the parametric gradient via the Jacobian), not the parametric one.
+    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
+}
+
+/// Readable alias for the scalar [`Element`] trait.
+pub use Element as ScalarElement;
+
+/// Vector-valued `H(div)`-conforming element: one **vector** shape function per
+/// degree of freedom, with a well-defined divergence.
+///
+/// Unlike [`Element`], the shape functions map a point to a `D`-vector (e.g. the
+/// edge-flux basis of the Raviart–Thomas element), so they cannot be represented
+/// by the scalar `Element::shape`. The natural dof functional is the normal
+/// flux through a facet, and the finite-element space is a subspace of
+/// `H(div)`; see [`crate::element::rttri3::RTTri3`] for the lowest-order
+/// triangle.
+///
+/// [`HdivElement::shape`] has the **same name** as [`Element::shape`] but
+/// returns `[[f64; D]; N]`. A concrete type implements at most one of the two
+/// traits in this crate, so ordinary method calls are unambiguous; a type that
+/// implements both would need UFCS (`Element::shape` / `HdivElement::shape`) to
+/// disambiguate.
+pub trait HdivElement<const D: usize, const P: usize, const N: usize>:
+    ElementBase<D, P, N>
+{
+    /// Vector shape functions, indexed `[dof][spatial]`: `N` vectors of length
+    /// `D`, evaluated at the parametric point `ξ`.
+    ///
+    /// This is the vector-valued counterpart of [`Element::shape`]; see the
+    /// trait documentation for the same-name caveat.
+    fn shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
+
+    /// Divergence of each vector shape function, `∇·qᵢ`, evaluated at `ξ`.
+    fn divergence_shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
 }
 
 pub trait IntegrationScheme<const P: usize, const G: usize> {

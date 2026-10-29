@@ -454,7 +454,58 @@ $$
 
 即"净产热扣除 Neumann 与 Robin 的流出后，剩下的全部经 Dirichlet 边界流出"。这条恒等式既是拉格朗日乘子法算例的现成单元测试断言，也是罚函数法结果的自检手段（用 $K\mathbf T - \mathbf F$ 在约束节点上的残差近似 $\lambda$）。
 
-## 7. 与 ansatz 抽象的对应
+## 7. 混合（Hellinger–Reissner）形式：通量与温度独立
+
+前两节把温度作为唯一未知量；混合形式改为把**通量** $\boldsymbol q$ 与**温度** $T$ 都作为独立未知量，一阶系统为（约定 $\boldsymbol q=-k\nabla T$，$\boldsymbol n$ 外法向）
+
+$$
+\boldsymbol q+k\nabla T=\boldsymbol 0,\qquad \nabla\cdot\boldsymbol q+f=0 .
+$$
+
+对第一个方程乘测试函数 $\boldsymbol r$ 并**逐单元分部积分**，第二个方程乘 $w$，得到 §4.2 的形式 B：
+
+$$
+\text{(B1)}\quad \int_\Omega\frac1k\boldsymbol q\cdot\boldsymbol r\,d\Omega
+-\int_\Omega T\,\nabla\cdot\boldsymbol r\,d\Omega
+=-\int_{\Gamma_D}T_D\,\boldsymbol r\cdot\boldsymbol n\,ds ,
+$$
+
+$$
+\text{(B2)}\quad -\int_\Omega\nabla\cdot\boldsymbol q\,w\,d\Omega
+=\int_\Omega f\,w\,d\Omega .
+$$
+
+与原始形式相比有两条关键变化：温度成为 $L^2$ 乘子（允许跨单元间断），Dirichlet 数据 $T_D$ 变成**自然边界条件**（进入 (B1) 右端），而 Neumann 数据 $\boldsymbol q\cdot\boldsymbol n=q_n$ 变成通量空间上的**本质约束**。
+
+离散取 $\boldsymbol q_h\in\mathcal{RT}_0$、$T_h\in\mathcal{P}_0$，记 $\boldsymbol A_{ij}=\int\frac1k\boldsymbol q_i\cdot\boldsymbol q_j$、$C_{ce}=-\int N_c\nabla\cdot\boldsymbol q_e$、$\ell_i=-\int_{\Gamma_D}T_D\,\boldsymbol q_i\cdot\boldsymbol n$、$m_c=\int fN_c$，得到鞍点系统
+
+$$
+\begin{bmatrix}\boldsymbol A & \boldsymbol C^{\mathsf T}\\ \boldsymbol C & \boldsymbol 0\end{bmatrix}
+\begin{bmatrix}\boldsymbol q\\ \boldsymbol T\end{bmatrix}
+=\begin{bmatrix}\boldsymbol\ell\\ \boldsymbol m\end{bmatrix},
+\qquad \boldsymbol A\ \text{对称正定},\ \boldsymbol C\ \text{矩形}.
+$$
+
+它对称但**不定**，必须用 `sp_lu`（或 $LDL^{\mathsf T}$），不能走 Cholesky。若消去 $\boldsymbol q$，得到 $\boldsymbol T$ 上的 Schur 补 $-\boldsymbol C\boldsymbol A^{-1}\boldsymbol C^{\mathsf T}$；局部守恒是精确的：取 $w=1$ 的 (B2) 给出 $\nabla\cdot\boldsymbol q_h=(\Pi_0f)|_T$。
+
+### 与 ansatz 的对应
+
+| 弱形式项 | 算子 | 说明 |
+|---|---|---|
+| $\boldsymbol A$ | `heat::mixed_flux_mass(&flux, k)` | 返回**完整** $\boldsymbol A$（鞍点矩阵走 LU） |
+| $\boldsymbol C$ | `heat::mixed_divergence(&flux, &temperature)` | 返回完整 $M\times N$ 块，行温度、列通量；$\boldsymbol C^{\mathsf T}$ 由行列互换 |
+| $\boldsymbol\ell$ | `heat::mixed_dirichlet(&traces, T_D)` | 边界迹单元为 `RTSeg3`；含**全部**三个父单元通量自由度 |
+| $\boldsymbol m$ | `heat::heat_source(&temperature, f)` | 对 $\mathcal P_0$ 即 $\int_T f$ |
+
+对应的单元：通量用 `element::rttri3::RTTri3<D>`（实现 `HdivElement<D,2,3>`），温度用 `element::p0tri3::P0Tri3<D>`（单元一个自由度，`Element<D,2,1>`），Dirichlet 边界积分用 `element::rttri3::RTSeg3<D>`（`RTSeg3::from_rttri3(&rt, facet)`，`normal_flux_shape` 给出 $\boldsymbol q_i\cdot\boldsymbol n$）。
+
+**边界条件**：Dirichlet 用 `mixed_dirichlet` 的自然项；Neumann 是本质条件，直接把边界边的通量自由度固定为 $\Phi_e=\ell_e q_n$，**不要**再加 `heat_flux` 载荷。Robin 条件在 (B1) 的边界项中代入 $\boldsymbol r\cdot\boldsymbol n=h(T-T_\infty)$，会同时产生 $T$ 的质量型边界块与常数载荷；目前尚未提供专用的混合 Robin 算子。
+
+**方向符号**：`RTTri3` 的基函数按单元**外法向**定向。相邻两个单元在公共边上的外法向相反，因此整体组装时必须对每个（单元，边）引入 $\sigma_{e,T}=\pm1$（以全局边法向为准），并把它乘到相应的 $\boldsymbol A$ 行/列、$\boldsymbol C$ 列与 $\boldsymbol\ell$ 分量上。单元素算例（测试 `mixed_heat_saddle_point_reproduces_a_linear_temperature`）中 $\sigma\equiv1$，无需处理。
+
+求解一个单元上的 RT0/P0 混合系统，$k=1$、$f=0$、$T=2+x+2y$ 在三条边上给定，可精确重现 $\boldsymbol q=(-1,-2)$ 与单元平均温度 $17/3$，该测试同时验证了 $\boldsymbol A$、$\boldsymbol C$、$\boldsymbol\ell$ 的符号。
+
+## 8. 与 ansatz 抽象的对应
 
 热传导完全复用现有抽象（`Element`、`Variable`、`IntegrationScheme`），只需新增一组热算子。参照 `src/operation/bar.rs` 的四个函数：
 
@@ -467,6 +518,9 @@ $$
 | —（已实现） | `temperature_lagrangian(T, λ, T_D)` | 拉格朗日乘子：返回完整耦合块 $G_{aj} = \int_{\Gamma_D} \Lambda_a N_j\,d\Gamma$（$M\times N$ 全部元素）与 $g_a = \int_{\Gamma_D} \Lambda_a T_D\,d\Gamma$；$T$ 与 $\lambda$ 可用不同形函数，需解鞍点系统（见 §6） |
 | —（新增） | `convection(v, h, T_∞)` | Robin 项：刚度 $h\int N_i N_j\,d\Gamma$ + 载荷 $h T_\infty\int N_i\,d\Gamma$（沿边界积分） |
 | —（新增） | `capacity(v, ρc_p)` | 质量矩阵 $M_{ij} = \sum_g \rho c_p N_i N_j\,|J|\,w_g$ |
+| —（新增） | `mixed_flux_mass(flux, k)` | 混合形式通量块 $A_{ij}=\int (1/k)\boldsymbol q_i\cdot\boldsymbol q_j$（RT0，完整矩阵） |
+| —（新增） | `mixed_divergence(flux, T)` | 混合形式耦合块 $C_{ce}=-\int N_c\nabla\cdot\boldsymbol q_e$（完整矩形块） |
+| —（新增） | `mixed_dirichlet(traces, T_D)` | 混合形式 Dirichlet 自然载荷 $\ell_i=-\int_{\Gamma_D}T_D\,\boldsymbol q_i\cdot\boldsymbol n$（`RTSeg3` 边界迹） |
 
 要点：
 

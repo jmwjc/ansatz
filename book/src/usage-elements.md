@@ -1,6 +1,6 @@
 # 单元类型
 
-本库目前提供九种单元，均以 `Node<D>` 作为节点存储；对协调单元（`Seg2`/`Tri3`/`Quad4`/`Poi1`/`Tet4`）节点就是顶点；非协调的 `CRTri3` 节点是边中点、`CRTet4` 节点是面重心，边界迹单元 `CRSeg3`/`CRTri4` 的"节点"是其父单元的顶点。
+本库目前提供十二种单元，均以 `Node<D>` 作为节点存储；对协调单元（`Seg2`/`Tri3`/`Quad4`/`Poi1`/`Tet4`）节点就是顶点；非协调的 `CRTri3` 节点是边中点、`CRTet4` 节点是面重心；分片常数 `P0Tri3` 的"节点"是单元重心，只用来携带单元自由度；边界迹单元 `CRSeg3`/`CRTri4`/`RTSeg3` 的"节点"是其父单元的顶点；`RTTri3` 是唯一**向量值**单元（$H(\mathrm{div})$ 协调），其"节点"同样是边中点，存放的是边通量自由度。
 
 ## `Seg2<D>`：2 节点线单元
 
@@ -167,6 +167,71 @@ CR 在一条边上的迹依赖相邻三角形的**全部三个**边自由度，�
 - 迹基（2D，`lo < hi` 为 facet 两顶点下标）：`shape[facet] = 1`、`shape[lo] = ξ`、`shape[hi] = −ξ`；
 - 几何取 facet 顶点构成的 `Seg2`/`Tri3`（`jacobe = L/2` 或 `2×面积`），是**非等参**的；
 - 积分：`CRSeg3` 用 `FullIntegration<1, 2>` / `ReducedIntegration<1, 1>`，`CRTri4` 用 `FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`。
+
+## `RTTri3<D>`：Raviart–Thomas（RT0）三角形
+
+```rust
+pub struct RTTri3<const D: usize> { /* ... */ }
+
+impl<const D: usize> HdivElement<D, 2, 3> for RTTri3<D> {
+    fn shape(&self, xi: [f64; 2]) -> [[f64; D]; 3];
+    fn divergence_shape(&self, xi: [f64; 2]) -> [f64; 3];
+}
+
+impl<const D: usize> RTTri3<D> {
+    pub fn new(m1: Node<D>, m2: Node<D>, m3: Node<D>) -> Self;
+    pub fn from_tri3(tri: &Tri3<D>, edge_id: impl FnMut(usize, usize) -> usize) -> Self;
+    pub fn triangle_vertices(&self) -> [[f64; D]; 3];
+    pub fn area(&self) -> f64;
+    pub fn reference_vector_shape(&self, xi: [f64; 2]) -> [[f64; 2]; 3];
+    pub fn mass_matrix(&self) -> [[f64; 3]; 3];
+    pub fn flux_dof(&self, edge: usize, q: impl Fn([f64; D]) -> [f64; D]) -> Option<f64>;
+}
+```
+
+最低阶 Raviart–Thomas 单元（RT0），局部空间是仿射向量场 $\boldsymbol q(\boldsymbol x)=\boldsymbol a+c\,\boldsymbol x$，三个自由度是三条边上的**法向通量**
+
+$$
+\Phi_e(\boldsymbol q)=\int_{\Gamma_e}\boldsymbol q\cdot\boldsymbol n_e\,ds ,
+$$
+
+对应基函数 $\boldsymbol q_I=(\boldsymbol x-\boldsymbol x_I)/(2|T|)$（$\boldsymbol x_I$ 为边 $\Gamma_I$ 的对顶点，$\boldsymbol n_I$ 为外法向），满足 $\Phi_J(\boldsymbol q_I)=\delta_{IJ}$、$\nabla\cdot\boldsymbol q_I=1/|T|$。全局空间 $H(\mathrm{div})$ 协调：切向可以跳跃，法向通量跨边单值。
+
+`RTTri3` 与 `CRTri3` 的数据布局完全相同（`nodes[i]` 是边 $i$ 的中点，`Node::id` 是该边的全局自由度），因此可以共用 `EdgeTable`；但它的基底是**向量**，无法用 `Element::shape`（每个自由度一个标量）表达，所以它不实现标量 `Element`，而实现 `ElementBase<D, 2, 3>`（几何与自由度）与 `HdivElement<D, 2, 3>`（`HdivElement::shape` / `divergence_shape`）；上面代码列出的是剩下不进入通用抽象的固有工具方法。质量矩阵是**稠密**的（与 CR 的对角质量矩阵不同），用 `FullIntegration<2, 3>` / `Dunavant<3>`；散度为常数，`ReducedIntegration<2, 1>` 即精确。理论、与 CR 的等价（杂交化 RT0 凝聚后即 CR 刚度）见「混合格式与 $H(\mathrm{div})$：Raviart–Thomas（RT0）」章。 形函数与分量的可视化见 `cargo run --example rt0`（输出 `target/rt0_shape_functions.png` 与 `target/rt0_shape_components.png`）。
+
+## `P0Tri3<D>`：分片常数（P0）三角形
+
+```rust
+pub struct P0Tri3<const D: usize> { /* ... */ }
+
+impl<const D: usize> P0Tri3<D> {
+    pub fn new(vertices: [Node<D>; 3], dof_id: usize) -> Self;
+    pub fn from_tri3(tri: &Tri3<D>, dof_id: usize) -> Self;
+    pub fn vertices(&self) -> &[Node<D>; 3];
+    pub fn centroid(&self) -> &Node<D>;
+}
+```
+
+局部空间为常数，`P = 2`、`N = 1`：形函数恒为 1、梯度为 0，`jacobe = 2×面积`，几何（逆映射、`contains`）委托给三个角点构成的 `Tri3`。唯一的"节点"是重心，只承载全局**单元自由度** id（因此不能按顶点编号）。实现 `Element<D, 2, 1>`，积分 `FullIntegration<2, 3>` / `ReducedIntegration<2, 1>`。
+
+典型用途是混合（Hellinger–Reissner）热传导中的温度空间（与 `RTTri3` 组成 RT0/P0 稳定对），见「热传导方程」§7 与 `heat::mixed_divergence`。
+
+## `RTSeg3<D>`：RT0 的边界迹
+
+```rust
+pub struct RTSeg3<const D: usize> { /* ... */ }
+
+impl<const D: usize> RTSeg3<D> {
+    pub fn new(facets: [usize; 3], vertices: [Node<D>; 3], facet: usize) -> Option<Self>;
+    pub fn from_rttri3(parent: &RTTri3<D>, facet: usize) -> Option<Self>;
+    pub fn local_facet(&self) -> usize;
+    pub fn normal_flux_shape(&self, xi: [f64; 1]) -> [f64; 3];
+}
+```
+
+`RTTri3` 的一条边上的法向迹。三个自由度是**父三角形的全部三个边通量自由度**（`id() == 父单元 id()`），`facet = k` 表示"父顶点 $k$ 的对边"；几何取该边两端点构成的 `Seg2`（`jacobe = L/2`），是**非等参**的。`normal_flux_shape` 返回 $\boldsymbol q_i\cdot\boldsymbol n$（$i$ 为父单元的三个通量 dof），RT0 下为 $\delta_{i,\mathrm{facet}}/\ell_{\mathrm{facet}}$。
+
+它实现 `ElementBase<D, 1, 3>` 与 `IntegrationScheme<1, 1>` / `<1, 2>`，但不实现标量 `Element`。用途是混合格式中 Dirichlet 数据的自然边界项 $\ell_i=-\int_{\Gamma_D}T_D\,\boldsymbol q_i\cdot\boldsymbol n\,ds$（见 `heat::mixed_dirichlet`）。
 
 ## `Quad4<D>`：4 节点四边形
 

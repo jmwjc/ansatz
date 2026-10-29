@@ -11,14 +11,20 @@
 
 核心 trait 与积分规则（`src/element/mod.rs`）：
 
-- `Element<const D: usize, const P: usize, const N: usize>`：
+- `ElementBase<const D: usize, const P: usize, const N: usize>`：所有单元共享的部分
   - `id() -> [usize; N]`
-  - `shape([f64; P]) -> [f64; N]`
-  - `derivative_shape([f64; P]) -> [f64; N]`
   - `vertices_coordinates() -> [[f64; D]; N]`
   - `coordinates([f64; P]) -> [f64; D]`
   - `jacobe([f64; P]) -> f64`
-  - `jacobe_mat([f64; P]) -> [[f64; P]; D]`
+  - `jacobe_mat([f64; P]) -> [[f64; D]; P]`
+  - `local_coordinates([f64; D]) -> Option<[f64; P]>`
+  - `contains([f64; D]) -> bool`（默认实现）
+- `Element<const D: usize, const P: usize, const N: usize>: ElementBase`：标量单元（别名 `ScalarElement`）
+  - `shape([f64; P]) -> [f64; N]`
+  - `derivative_shape([f64; P]) -> [[f64; D]; N]`
+- `HdivElement<const D: usize, const P: usize, const N: usize>: ElementBase`：向量值 `H(div)` 单元
+  - `shape([f64; P]) -> [[f64; D]; N]`
+  - `divergence_shape([f64; P]) -> [f64; N]`
 - `IntegrationScheme<const P: usize, const G: usize>`：`points() -> [[f64; P]; G]`、`weights() -> [f64; G]`。
 - `FullIntegration<P, G>` / `ReducedIntegration<P, G>`：标记子 trait。
 - 积分规则标记类型：`GaussLegendre1D<N>`、`Dunavant<G>`、`TensorProductQuad<N>`、`Keast<G>`、`TensorProductHex<N>`、`Point`。
@@ -29,6 +35,9 @@
 - `element::tri3::Tri3<D>`：`new(n1, n2, n3)`，3 节点三角形；
 - `element::crtri3::CRTri3<D>`：`new(m1, m2, m3)`（三个边中点）、`from_tri3(&tri, edge_id)`、`triangle_vertices()`，Crouzeix–Raviart 非协调线性三角形；
 - `element::tet4::Tet4<D>`：`new(n1..n4)`、`volume()`，4 节点线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`，`FromGmsh` 类型 4）；
+- `element::rttri3::RTTri3<D>`：`new(m1, m2, m3)`（三个边中点）、`from_tri3(&tri, edge_id)`、`triangle_vertices()`、`area()`、`reference_vector_shape`、`divergence`、`mass_matrix()`、`edge_normal()`、`flux_dof(edge, q)`，最低阶 Raviart–Thomas（RT0）三角形；向量值、$H(\mathrm{div})$ 协调，实现 `ElementBase<D,2,3> + HdivElement<D,2,3>`（向量基为 `HdivElement::shape`，散度为 `HdivElement::divergence_shape`）；
+- `element::p0tri3::P0Tri3<D>`：`new(vertices, dof_id)`、`from_tri3(&tri, dof_id)`、`vertices()`、`centroid()`，分片常数（P0）三角形，`Element<D,2,1>`（一个单元自由度，形函数 1、梯度 0）；
+- `element::rttri3::RTSeg3<D>`：`new(facets, parent_vertices, facet)`、`from_rttri3(&parent, facet)`、`local_facet()`、`facet_vertices()`、`parent_vertices()`、`normal_flux_shape(xi)`，RT0 的边界迹单元（父单元三个通量自由度，`jacobe = L/2`），用于混合格式的 Dirichlet 自然项；
 - `element::crtet4::CRTet4<D>`：`new(f1..f4)`（四个面重心）、`from_tet4(&Tet4, face_id)`、`from_vertices([Node;4], face_id)`（及对应的 `try_*`）、`tetrahedron_vertices()`、`volume()`，CR 非协调线性四面体（`Element<D,3,4>`，`FullIntegration<3,4>` / `ReducedIntegration<3,1>`）；
 - `element::crtri3::CRSeg3<D>` / `element::crtet4::CRTri4<D>`：CR 的 facet 迹单元（2D 线段 / 3D 三角形），`new(facets, parent_vertices, facet)`、`CRSeg3::from_crtri3(&parent, facet)`、`CRTri4::from_crtet4(&parent, facet)`、`local_facet()`、`facet_vertices()`、`parent_vertices()`，用于边界条件；
 - `element::quad4::Quad4<D>`：`new(n1, n2, n3, n4)`，4 节点四边形；
@@ -42,6 +51,11 @@
 - `gradient` / `divergence` / `curl` 由具体问题模块实现，不在 `Variable` 上。
 - `spatial`：`Aabb<D>`、`SpatialIndex<T, D>`（AABB broad phase + 均匀网格，可复用于无网格邻域搜索）。
 - `heat::gradient` / `heat::flux`；`elasticity::strain` / `elasticity::stress`。
+- `heat` 混合（Hellinger–Reissner）算子（RT0 通量 + P0 温度）：
+  - `mixed_flux_mass(&flux, k) -> Vec<Triplet>`：`Aᵢⱼ = ∫ (1/k) qᵢ·qⱼ`，返回完整矩阵；
+  - `mixed_divergence(&flux, &temperature) -> Result<Vec<Triplet>, VariableError>`：`C_{ce} = −∫ N_c ∇·q_e`，返回完整 `M×N` 块（行温度、列通量）；
+  - `mixed_dirichlet(&traces, T_D) -> Vec<Doublet>`：`ℓᵢ = −∫_{Γ_D} T_D qᵢ·n`，边界迹为 `RTSeg3`；
+  - 源项用 `heat_source(&temperature, f)`；鞍点系统需 `sp_lu`。
 - `elasticity::Lame::{from_engineering, three_dimensional, plane_stress, plane_strain, bulk_modulus}`：具名 Lamé 常量。
 - `operation::bar`（1D 桁架组装算子）：
   - `stiffness(v, ea) -> Vec<Triplet<usize, usize, f64>>`

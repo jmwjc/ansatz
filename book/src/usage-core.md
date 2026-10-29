@@ -2,35 +2,68 @@
 
 `ansatz` 的公共 API 由少数几个 trait 组织而成。理解这些 trait 是使用与扩展库的关键。
 
-## `Element<D, P, N>`：单元抽象
+## 单元 trait：`ElementBase` / `Element` / `HdivElement`
 
-所有单元都实现 `Element<D, P, N>`，三个 const 泛型参数是编译期常量：
+单元抽象按「几何」与「形函数」拆成三个 trait，三个 const 泛型参数都是编译期常量：
 
 - `D`：**空间维数**（物理空间，1/2/3）；
 - `P`：**参数空间维数**（0 = 点、1 = 线、2 = 面）；
-- `N`：**节点数**。
+- `N`：**自由度/节点数**。
+
+### `ElementBase<D, P, N>`：所有单元共享的几何与自由度
 
 ```rust
-pub trait Element<const D: usize, const P: usize, const N: usize> {
+pub trait ElementBase<const D: usize, const P: usize, const N: usize> {
     fn id(&self) -> [usize; N];
-    fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
-    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
-
     fn vertices_coordinates(&self) -> [[f64; D]; N];
     fn coordinates(&self, parametric_coordinates: [f64; P]) -> [f64; D];
     fn jacobe(&self, parametric_coordinates: [f64; P]) -> f64;
-    fn jacobe_mat(&self, parametric_coordinates: [f64; P]) -> [[f64; P]; D];
+    fn jacobe_mat(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; P];
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; P]>;
+    fn contains(&self, x: [f64; D]) -> bool { /* local_coordinates(x).is_some() */ }
 }
 ```
 
-方法语义（细节见理论部分）：
+它不涉及"每个自由度是标量还是向量"，因此标量单元与向量值单元共享同一套定位、雅可比、度量与边界盒逻辑。
 
-- `id()`：单元的 `N` 个全局节点编号，用于组装时定位稀疏矩阵的行列；
-- `shape(ξ)`：参数坐标 $ξ$ 处的 `N` 个形函数值；
-- `derivative_shape(ξ)`：形函数的（参数或物理）导数；
+### `Element<D, P, N>`：标量单元
+
+```rust
+pub trait Element<const D: usize, const P: usize, const N: usize>: ElementBase<D, P, N> {
+    fn shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
+    fn derivative_shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
+}
+```
+
+每个自由度对应一个**标量**形函数，这是 `Seg2`、`Tri3`、`Quad4`、`Tet4`、`Poi1` 与 CR 单元族实现的 trait。`ScalarElement` 是它的可读别名，用于强调与 `HdivElement` 的区别。
+
+### `HdivElement<D, P, N>`：$H(\mathrm{div})$ 向量值单元
+
+```rust
+pub trait HdivElement<const D: usize, const P: usize, const N: usize>: ElementBase<D, P, N> {
+    fn shape(&self, parametric_coordinates: [f64; P]) -> [[f64; D]; N];
+    fn divergence_shape(&self, parametric_coordinates: [f64; P]) -> [f64; N];
+}
+```
+
+每个自由度对应一个 **$D$ 维向量**形函数（例如 RT0 的边通量基），因此不能由 `Element::shape` 表达。最低阶 Raviart–Thomas 单元 `RTTri3` 即实现 `ElementBase + HdivElement`。
+
+> `HdivElement::shape` 与 `Element::shape` **同名**，但返回 `[[f64; D]; N]`。本库的单元不会同时实现两个 trait，因此普通方法调用不会歧义；若某个类型两者都实现，需用 UFCS（`Element::shape` / `HdivElement::shape`）消歧。
+
+### 方法语义
+
+- `id()`：单元的 `N` 个全局自由度编号，用于组装时定位稀疏矩阵的行列；
+- `vertices_coordinates()`：`N` 个节点的坐标（CR 是边中点/面重心，迹单元是父单元顶点）；
+- `Element::shape(ξ)`：参数坐标 $ξ$ 处的 `N` 个标量形函数值；
+- `HdivElement::shape(ξ)`：参数坐标 $ξ$ 处的 `N` 个向量形函数（每个一个 $D$ 维向量）；
+- `derivative_shape(ξ)`：标量形函数的**物理**梯度 `[[f64; D]; N]`（`[node][spatial]`）；
+- `divergence_shape(ξ)`：向量形函数的散度（仅 `HdivElement`）；
 - `coordinates(ξ)`：等参映射，把参数坐标映射回物理坐标；
 - `jacobe(ξ)`：面积/体积比（`|det J|` 的推广），数值积分时作为被积函数的度量因子；
-- `jacobe_mat(ξ)`：雅可比矩阵 $J[i][d] = ∂x_i/∂ξ_d$。
+- `jacobe_mat(ξ)`：雅可比矩阵 `J[a][i] = ∂xᵢ/∂ξₐ`（`[parametric][spatial]`）；
+- `local_coordinates(x)` / `contains(x)`：逆映射与点定位。
+
+> 通过 `T: Element` 或 `T: HdivElement` 的泛型约束可以直接调用 `ElementBase` 的方法；但对**具体类型**（如 `tri.jacobe(...)`）调用时，需要把 `ElementBase` 引入作用域。
 
 > 注意拼写：方法名是 `jacobe` 而非 `jacobian`，这是有意保留的既有命名，属于公开 API 的一部分，请勿"修正"。
 

@@ -68,7 +68,8 @@ use std::convert::Infallible;
 use crate::element::seg2::Seg2;
 use crate::element::tri3::Tri3;
 use crate::element::{
-    Dunavant, Element, FullIntegration, GaussLegendre1D, IntegrationScheme, ReducedIntegration,
+    Dunavant, Element, ElementBase, FullIntegration, GaussLegendre1D, IntegrationScheme,
+    ReducedIntegration,
 };
 use crate::node::Node;
 
@@ -200,24 +201,9 @@ impl<const D: usize> IntegrationScheme<2, 3> for CRTri3<D> {
 impl<const D: usize> FullIntegration<2, 3> for CRTri3<D> {}
 impl<const D: usize> ReducedIntegration<2, 1> for CRTri3<D> {}
 
-impl<const D: usize> Element<D, 2, 3> for CRTri3<D> {
+impl<const D: usize> ElementBase<D, 2, 3> for CRTri3<D> {
     fn id(&self) -> [usize; 3] {
         [self.nodes[0].id, self.nodes[1].id, self.nodes[2].id]
-    }
-
-    /// CR basis functions `θᵢ = 1 − 2λᵢ`, with `λ = (1 − ξ − η, ξ, η)` the
-    /// barycentric coordinates of the reference triangle.
-    fn shape(&self, parametric_coordinates: [f64; 2]) -> [f64; 3] {
-        let ξ = parametric_coordinates[0];
-        let η = parametric_coordinates[1];
-        let lambda = [1.0 - ξ - η, ξ, η];
-        std::array::from_fn(|i| 1.0 - 2.0 * lambda[i])
-    }
-
-    /// Physical gradient `∇ₓθᵢ = −2 ∇ₓλᵢ`; constant on the element.
-    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 3] {
-        let grad_lambda = self.as_tri3().derivative_shape(parametric_coordinates);
-        std::array::from_fn(|i| std::array::from_fn(|k| -2.0 * grad_lambda[i][k]))
     }
 
     /// Coordinates of the three edge midpoints (the element's nodes).
@@ -256,9 +242,26 @@ impl<const D: usize> Element<D, 2, 3> for CRTri3<D> {
     }
 
     /// Inverse isoparametric map: parametric coordinates of `x` inside the
-    /// triangle, or `None` if it lies outside (see [`Element::local_coordinates`]).
+    /// triangle, or `None` if it lies outside (see [`ElementBase::local_coordinates`]).
     fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 2]> {
         self.as_tri3().local_coordinates(x)
+    }
+}
+
+impl<const D: usize> Element<D, 2, 3> for CRTri3<D> {
+    /// CR basis functions `θᵢ = 1 − 2λᵢ`, with `λ = (1 − ξ − η, ξ, η)` the
+    /// barycentric coordinates of the reference triangle.
+    fn shape(&self, parametric_coordinates: [f64; 2]) -> [f64; 3] {
+        let ξ = parametric_coordinates[0];
+        let η = parametric_coordinates[1];
+        let lambda = [1.0 - ξ - η, ξ, η];
+        std::array::from_fn(|i| 1.0 - 2.0 * lambda[i])
+    }
+
+    /// Physical gradient `∇ₓθᵢ = −2 ∇ₓλᵢ`; constant on the element.
+    fn derivative_shape(&self, parametric_coordinates: [f64; 2]) -> [[f64; D]; 3] {
+        let grad_lambda = self.as_tri3().derivative_shape(parametric_coordinates);
+        std::array::from_fn(|i| std::array::from_fn(|k| -2.0 * grad_lambda[i][k]))
     }
 }
 
@@ -275,7 +278,7 @@ impl<const D: usize> Element<D, 2, 3> for CRTri3<D> {
 ///
 /// `facet = k` means "the facet opposite parent vertex `k`" (0-based), exactly the
 /// ordering of [`CRTri3`]'s dofs (`nodes[i]` is the edge opposite vertex `i`).
-/// Nothing else is numbered: [`Element::id`] returns the parent's three edge dofs
+/// Nothing else is numbered: [`ElementBase::id`] returns the parent's three edge dofs
 /// unchanged, so a trace element and its parent share one global numbering. The
 /// facet's own parametric direction is fixed by listing its vertices in **ascending
 /// parent index** order, which makes `shape` independent of how a mesh reader
@@ -352,11 +355,36 @@ impl<const D: usize> CRSeg3<D> {
     }
 }
 
-impl<const D: usize> Element<D, 1, 3> for CRSeg3<D> {
+impl<const D: usize> ElementBase<D, 1, 3> for CRSeg3<D> {
     fn id(&self) -> [usize; 3] {
         self.facets
     }
 
+    /// The parent's vertices (the element's nodes are facets, not points).
+    fn vertices_coordinates(&self) -> [[f64; D]; 3] {
+        self.vertices.map(|vertex| vertex.coordinates)
+    }
+
+    fn coordinates(&self, parametric_coordinates: [f64; 1]) -> [f64; D] {
+        self.as_seg2().coordinates(parametric_coordinates)
+    }
+
+    /// Length scaling of the facet: `L/2`, so that `∫_facet ds = L` with the
+    /// Gauss–Legendre rules of the reference interval `[-1, 1]`.
+    fn jacobe(&self, parametric_coordinates: [f64; 1]) -> f64 {
+        self.as_seg2().jacobe(parametric_coordinates)
+    }
+
+    fn jacobe_mat(&self, parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
+        self.as_seg2().jacobe_mat(parametric_coordinates)
+    }
+
+    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 1]> {
+        self.as_seg2().local_coordinates(x)
+    }
+}
+
+impl<const D: usize> Element<D, 1, 3> for CRSeg3<D> {
     /// Trace basis on the facet: with `λ` the parent's barycentric coordinates
     /// (zero at the opposite vertex, the facet's own coordinates elsewhere),
     /// `shapeₐ = 1 − 2λₐ`. With the facet's vertices ordered by ascending parent
@@ -393,29 +421,6 @@ impl<const D: usize> Element<D, 1, 3> for CRSeg3<D> {
         }
         out
     }
-
-    /// The parent's vertices (the element's nodes are facets, not points).
-    fn vertices_coordinates(&self) -> [[f64; D]; 3] {
-        self.vertices.map(|vertex| vertex.coordinates)
-    }
-
-    fn coordinates(&self, parametric_coordinates: [f64; 1]) -> [f64; D] {
-        self.as_seg2().coordinates(parametric_coordinates)
-    }
-
-    /// Length scaling of the facet: `L/2`, so that `∫_facet ds = L` with the
-    /// Gauss–Legendre rules of the reference interval `[-1, 1]`.
-    fn jacobe(&self, parametric_coordinates: [f64; 1]) -> f64 {
-        self.as_seg2().jacobe(parametric_coordinates)
-    }
-
-    fn jacobe_mat(&self, parametric_coordinates: [f64; 1]) -> [[f64; D]; 1] {
-        self.as_seg2().jacobe_mat(parametric_coordinates)
-    }
-
-    fn local_coordinates(&self, x: [f64; D]) -> Option<[f64; 1]> {
-        self.as_seg2().local_coordinates(x)
-    }
 }
 
 impl<const D: usize> IntegrationScheme<1, 1> for CRSeg3<D> {
@@ -443,7 +448,7 @@ impl<const D: usize> ReducedIntegration<1, 1> for CRSeg3<D> {}
 mod tests {
     use super::{CRSeg3, CRTri3};
     use crate::element::tri3::Tri3;
-    use crate::element::{Element, IntegrationScheme};
+    use crate::element::{Element, ElementBase, IntegrationScheme};
     use crate::node::Node;
     use std::collections::HashMap;
 

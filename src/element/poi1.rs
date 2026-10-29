@@ -1,4 +1,6 @@
-use crate::element::{Element, FullIntegration, IntegrationScheme, Point, ReducedIntegration};
+use crate::element::{
+    Element, ElementBase, FullIntegration, IntegrationScheme, Point, ReducedIntegration,
+};
 use crate::node::Node;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -32,20 +34,9 @@ impl<const D: usize> IntegrationScheme<0, 1> for Poi1<D> {
 impl<const D: usize> FullIntegration<0, 1> for Poi1<D> {}
 impl<const D: usize> ReducedIntegration<0, 1> for Poi1<D> {}
 
-impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
+impl<const D: usize> ElementBase<D, 0, 1> for Poi1<D> {
     fn id(&self) -> [usize; 1] {
         [self.nodes.id]
-    }
-
-    /// The shape function of a point element is identically 1 (the zero-dimensional parametric space has no coordinates).
-    fn shape(&self, _parametric_coordinates: [f64; 0]) -> [f64; 1] {
-        [1.0]
-    }
-
-    /// The shape function is constant, so its physical gradient is the zero
-    /// `D`-dimensional vector.
-    fn derivative_shape(&self, _parametric_coordinates: [f64; 0]) -> [[f64; D]; 1] {
-        [[0.0; D]; 1]
     }
 
     fn vertices_coordinates(&self) -> [[f64; D]; 1] {
@@ -81,11 +72,23 @@ impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
     }
 }
 
+impl<const D: usize> Element<D, 0, 1> for Poi1<D> {
+    /// The shape function of a point element is identically 1 (the zero-dimensional parametric space has no coordinates).
+    fn shape(&self, _parametric_coordinates: [f64; 0]) -> [f64; 1] {
+        [1.0]
+    }
+
+    /// The shape function is constant, so its physical gradient is the zero
+    /// `D`-dimensional vector.
+    fn derivative_shape(&self, _parametric_coordinates: [f64; 0]) -> [[f64; D]; 1] {
+        [[0.0; D]; 1]
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::Poi1;
-    use crate::element::Element;
+    use crate::element::{Element, ElementBase};
     use crate::node::Node;
 
     #[test]

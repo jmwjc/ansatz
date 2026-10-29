@@ -1,6 +1,6 @@
 [package]
 name = "ansatz"
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.85.0"
 description = "Discretization-agnostic approximation and assembly layer for mechanics problems: you supply the ansatz, a sparse solver does the rest."

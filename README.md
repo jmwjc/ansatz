@@ -318,7 +318,7 @@ fn evaluate(&self, xi: [f64; P]) -> Evaluation<D, P, N>;
 
 ## 当前状态
 
-早期原型（0.3.0）。已可端到端运行：
+早期原型（0.4.0）。已可端到端运行：
 
 - 单元：`Seg2<D>`、`Tri3<D>`、`Quad4<D>`、`Poi1<D>`；
 - 积分：1D Gauss–Legendre，2D Dunavant / 张量积，3D Keast / 张量积；
